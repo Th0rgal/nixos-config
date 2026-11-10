@@ -26,6 +26,10 @@
         layout = "us";
         variant = "intl";
       };
+      touchpad = {
+        naturalScroll = false;
+        scrollFactor = 0.5;
+      };
       autostartTty.enable = true;
     };
     hardware.m2air = {
@@ -54,10 +58,15 @@
     restic
     rclone
     gh
+    libsecret
     orb-desktop
     notion-calendar
     antigravity-hub
   ];
+
+  # Secret Service (org.freedesktop.secrets) required by Bitwarden Desktop for
+  # biometric unlock alongside Polkit (`polkit-1` PAM -> `pam_fprintd.so`).
+  services.gnome.gnome-keyring.enable = true;
 
   users.users.thomas = {
     isNormalUser = true;

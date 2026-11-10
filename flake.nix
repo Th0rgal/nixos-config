@@ -68,21 +68,31 @@
     in
     {
       nixosConfigurations = {
-        # MacBook Air M2 daily driver (stock nixos-apple-silicon + alx.sh Stage 2)
+        # MacBook Air M2 daily driver with Aurora SEP, Touch ID (fprintd), FIDO2 (aurora-fido) & Orb Touch ID signer
         m2air = mkHost {
+          withAuroraOverlay = true;
           modules = [
-            apple-silicon-support.nixosModules.apple-silicon-support
+            nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/m2air
+            ./hosts/m2air/aurora.nix
           ];
         };
 
-        # MacBook Air M2 with Stage-2 Aurora SEP, Touch ID (fprintd) & FIDO2 (aurora-fido)
+        # Alias for m2air with Aurora SEP & Touch ID enabled
         m2air-aurora = mkHost {
           withAuroraOverlay = true;
           modules = [
             nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/m2air
             ./hosts/m2air/aurora.nix
+          ];
+        };
+
+        # Stock nixos-apple-silicon fallback (without Stage-2 Aurora SEP)
+        m2air-stock = mkHost {
+          modules = [
+            apple-silicon-support.nixosModules.apple-silicon-support
+            ./hosts/m2air
           ];
         };
 
