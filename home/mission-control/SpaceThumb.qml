@@ -49,9 +49,7 @@ Item {
 
   readonly property bool hasLiveSpace: liveWorkspace !== null || liveWindows.length > 0 || active
   property var frozenIsPlaceholder: null
-  readonly property bool isPlaceholder: monitorView.spaceReordering && frozenIsPlaceholder !== null
-    ? frozenIsPlaceholder
-    : !hasLiveSpace
+  readonly property bool isPlaceholder: false
   readonly property string spaceName: liveWorkspace ? String(liveWorkspace.name) : String(spaceId)
   readonly property var workspace: liveWorkspace || ({ id: spaceId, name: spaceName })
 
@@ -169,7 +167,7 @@ Item {
     opacity: thumb.absorbedByShift ? 0 : 1
     scale: thumb.pointerDragging
       ? 1.08
-      : (thumb.dropHover ? 1.06 : (mouse.containsMouse ? (thumb.isPlaceholder ? 1.04 : 1.06) : 1))
+      : (thumb.dropHover ? 1.06 : ((mouse.containsMouse || closeMouse.containsMouse) ? (thumb.isPlaceholder ? 1.04 : 1.06) : 1))
 
     Behavior on x {
       enabled: !thumb.pointerDragging && !thumb.monitorView.suppressSpaceAnim
@@ -187,7 +185,7 @@ Item {
     }
 
     RectangularShadow {
-      visible: !thumb.isPlaceholder
+      visible: thumb.monitorView.controller.mapped && !thumb.isPlaceholder
       anchors.fill: parent
       radius: thumb.radius
       blur: thumb.pointerDragging ? 26 : 18
@@ -264,7 +262,7 @@ Item {
       id: content
       anchors.fill: parent
       visible: false
-      layer.enabled: true
+      layer.enabled: thumb.monitorView.controller.mapped && !thumb.isPlaceholder
 
       Rectangle {
         anchors.fill: parent
@@ -273,12 +271,14 @@ Item {
 
       Image {
         anchors.fill: parent
-        source: thumb.monitorView.controller.backgroundPath
-          ? "file://" + thumb.monitorView.controller.backgroundPath
-          : ""
+        readonly property string bgPath: thumb.monitorView.controller.wallpaperForWorkspace(thumb.spaceId)
+        source: bgPath ? "file://" + bgPath : ""
         sourceSize.width: 320
         fillMode: Image.PreserveAspectCrop
+        verticalAlignment: bgPath.indexOf("bologna-dome") >= 0 ? Image.AlignTop : Image.AlignVCenter
         asynchronous: true
+        cache: true
+        mipmap: false
       }
 
       Repeater {
@@ -306,11 +306,11 @@ Item {
       anchors.fill: parent
       radius: thumb.radius
       visible: false
-      layer.enabled: true
+      layer.enabled: thumb.monitorView.controller.mapped && !thumb.isPlaceholder
     }
 
     MultiEffect {
-      visible: !thumb.isPlaceholder
+      visible: thumb.monitorView.controller.mapped && !thumb.isPlaceholder
       anchors.fill: parent
       source: content
       maskEnabled: true
@@ -414,6 +414,54 @@ Item {
         thumb.dragX = 0
         thumb.dragY = 0
         settleTimer.restart()
+      }
+    }
+  }
+
+  // macOS-style top-left close pill for empty Spaces when hovered
+  Rectangle {
+    id: closeButton
+    readonly property bool canClose: thumb.windows.length === 0
+      && thumb.monitorView.spaceIds.length > 1
+      && !thumb.pointerDragging
+      && !thumb.settling
+      && !thumb.monitorView.spaceReordering
+    visible: opacity > 0.01
+    opacity: canClose && (mouse.containsMouse || closeMouse.containsMouse) ? 1 : 0
+    width: 22
+    height: 22
+    radius: 11
+    x: card.x - 8
+    y: card.y - 8
+    z: 20
+    color: closeMouse.containsMouse ? Qt.rgba(0.95, 0.28, 0.28, 0.96) : Qt.rgba(0.14, 0.14, 0.16, 0.88)
+    border.width: 1
+    border.color: Qt.rgba(1, 1, 1, 0.28)
+
+    Behavior on opacity { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+    Behavior on color { ColorAnimation { duration: 100 } }
+
+    Text {
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: -0.5
+      text: "×"
+      textFormat: Text.PlainText
+      color: "white"
+      font.family: thumb.monitorView.fontFamily
+      font.pixelSize: 15
+      font.weight: Font.Medium
+    }
+
+    MouseArea {
+      id: closeMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: closeButton.canClose && thumb.monitorView.p > 0.5
+      cursorShape: Qt.PointingHandCursor
+      acceptedButtons: Qt.LeftButton
+      onClicked: function(m) {
+        m.accepted = true
+        thumb.monitorView.closeEmptySpace(thumb.spaceId)
       }
     }
   }

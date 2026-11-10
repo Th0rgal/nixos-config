@@ -18,7 +18,7 @@ PanelWindow {
   readonly property color accent: Commons.Color.accent
   readonly property color foreground: Commons.Color.foreground
   readonly property color background: Commons.Color.background
-  readonly property string fontFamily: Style.font.family
+  readonly property string fontFamily: Style.font.menuFamily || Style.font.family
   readonly property int radius: Style.cornerRadius
 
   // Spaces bar geometry (scales down gracefully if many workspace numbers exist)
@@ -281,7 +281,24 @@ PanelWindow {
       pendingMoveCleanupTimer.restart()
     }
     var dest = target === "new" ? String(destId) : String(target)
-    controller.moveWindow(t.address, dest)
+    controller.moveWindow(t.address, dest, target === "new")
+    refreshSoon.restart()
+    refreshFollowUp.restart()
+  }
+
+  function addSpaceCard() {
+    if (spaceReordering) return
+    var destId = nextNewWorkspaceId
+    if (destId > sessionMaxSpaceId) sessionMaxSpaceId = destId
+    controller.createSpace(destId)
+    refreshSoon.restart()
+    refreshFollowUp.restart()
+  }
+
+  function closeEmptySpace(spaceId) {
+    if (spaceReordering || spaceIds.length <= 1) return
+    sessionMaxSpaceId = Math.max(1, Math.max(currentMaxSpaceId, sessionMaxSpaceId) - 1)
+    controller.removeSpace(spaceId)
     refreshSoon.restart()
     refreshFollowUp.restart()
   }
@@ -588,9 +605,13 @@ PanelWindow {
     Image {
       id: wallpaper
       anchors.fill: parent
-      source: view.controller.backgroundPath ? "file://" + view.controller.backgroundPath : ""
+      readonly property string bgPath: view.controller.wallpaperForWorkspace(
+        view.activeWorkspace && view.activeWorkspace.id > 0 ? view.activeWorkspace.id : 1
+      )
+      source: bgPath ? "file://" + bgPath : ""
       sourceSize.width: 960
       fillMode: Image.PreserveAspectCrop
+      verticalAlignment: bgPath.indexOf("bologna-dome") >= 0 ? Image.AlignTop : Image.AlignVCenter
       asynchronous: true
       visible: false
     }
@@ -598,7 +619,7 @@ PanelWindow {
     MultiEffect {
       anchors.fill: parent
       source: wallpaper
-      visible: wallpaper.status === Image.Ready
+      visible: view.controller.mapped && wallpaper.status === Image.Ready
       autoPaddingEnabled: false
       blurEnabled: true
       blur: 1.0
@@ -672,7 +693,7 @@ PanelWindow {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onClicked: view.switchTo(view.nextNewWorkspaceId)
+        onClicked: view.addSpaceCard()
       }
     }
   }

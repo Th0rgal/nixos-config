@@ -24,9 +24,40 @@ Item {
 
   readonly property string pluginId: (manifest && manifest.id) || "io.github.joaovitor2763.mission-control"
   readonly property string backgroundLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
+  readonly property string wsWallpapersConfigPath: Quickshell.env("HOME") + "/.config/omarchy/workspace-wallpapers.json"
   property string backgroundPath: ""
+  property string defaultWorkspaceWallpaper: ""
+  property var workspaceWallpapers: ({})
   property string pendingFocusKind: ""
   property string pendingFocusTarget: ""
+
+  function parseWorkspaceWallpapers(raw) {
+    var text = String(raw || "").trim()
+    if (!text) return
+    try {
+      var obj = JSON.parse(text)
+      if (obj && typeof obj === "object") {
+        root.defaultWorkspaceWallpaper = typeof obj.default === "string" ? obj.default.trim() : ""
+        var map = {}
+        if (obj.workspaces && typeof obj.workspaces === "object") {
+          for (var k in obj.workspaces) {
+            var v = String(obj.workspaces[k] || "").trim()
+            if (v) map[String(k)] = v
+          }
+        }
+        root.workspaceWallpapers = map
+      }
+    } catch (e) {
+    }
+  }
+
+  function wallpaperForWorkspace(wsId) {
+    var key = String(wsId || "")
+    var map = root.workspaceWallpapers || {}
+    if (key && map[key]) return String(map[key])
+    if (root.defaultWorkspaceWallpaper) return root.defaultWorkspaceWallpaper
+    return root.backgroundPath
+  }
 
   function open(payloadJson) {
     if (root.opened) return
@@ -143,10 +174,28 @@ Item {
     dispatch("focus({ workspace = " + luaWorkspaceArg(workspace) + " })")
   }
 
-  function moveWindow(address, workspace) {
+  function moveWindow(address, workspace, ensureCeiling) {
     var clean = cleanAddress(address)
     if (!clean) return
+    if (ensureCeiling && /^\d+$/.test(String(workspace))) {
+      var targetId = Number(workspace)
+      Hyprland.dispatch("function() "
+        + "if _G.__omarchnix_spaces then _G.__omarchnix_spaces.add_space(" + targetId + ") end "
+        + "hl.dispatch(hl.dsp.window.move({ workspace = " + targetId + ", follow = false, window = 'address:0x" + clean + "' })) "
+        + "end")
+      return
+    }
     dispatch("window.move({ workspace = " + luaWorkspaceArg(workspace) + ", follow = false, window = 'address:0x" + clean + "' })")
+  }
+
+  function createSpace(targetId) {
+    var id = Math.max(1, Math.floor(Number(targetId) || 1))
+    Hyprland.dispatch("function() if _G.__omarchnix_spaces then _G.__omarchnix_spaces.add_space(" + id + ") end end")
+  }
+
+  function removeSpace(spaceId) {
+    var id = Math.max(1, Math.floor(Number(spaceId) || 1))
+    Hyprland.dispatch("function() if _G.__omarchnix_spaces then _G.__omarchnix_spaces.close_space(" + id + ") end end")
   }
 
   // Atomically renumber workspaces in-place via temporary free IDs so split
@@ -159,6 +208,10 @@ Item {
     if (entries.length === 0) return
     var lua = "function() "
       + "local moves = {" + entries.join(",") + "} "
+      + "if _G.__omarchnix_spaces and _G.__omarchnix_spaces.reorder then "
+      +   "_G.__omarchnix_spaces.reorder(moves) "
+      +   "return "
+      + "end "
       + "local items = {} "
       + "local next_tmp = 9001 "
       + "for _, m in ipairs(moves) do "
@@ -211,6 +264,15 @@ Item {
     ScriptAction {
       script: root.mapped = false
     }
+  }
+
+  FileView {
+    id: wsWallpapersFile
+    path: root.wsWallpapersConfigPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseWorkspaceWallpapers(text())
+    onFileChanged: reload()
   }
 
   Process {

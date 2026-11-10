@@ -29,7 +29,10 @@
   fileSystems."/" = {
     device = "/dev/mapper/cryptroot";
     fsType = "ext4";
-    options = [ "defaults" ];
+    options = [
+      "defaults"
+      "noatime"
+    ];
   };
 
   fileSystems."/boot" = {
