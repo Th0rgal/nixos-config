@@ -6,15 +6,83 @@ import qs.Commons
 import "DockModel.js" as DockModel
 
 // macOS-style auto-hiding bottom dock showing active apps across all Spaces
-// (plus any pinned apps) and jumping to an app's active Space on click.
+// (plus any pinned apps) with high-DPI NixOS icon resolution.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
 
-  readonly property string userConfigPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+  readonly property string homeDir: Quickshell.env("HOME")
+  readonly property string userName: Quickshell.env("USER")
+  readonly property string userConfigPath: homeDir + "/.config/omarchy/shell.json"
   property var parsedDockConfig: ({})
+
+  // High-DPI icon index mapping icon name -> best SVG or 256x256/512x512 PNG path.
+  // Follows NixOS/Home Manager store symlinks (`find -L`) and scores by resolution
+  // instead of taking the first directory entry (which in hicolor is often 16x16).
+  property var iconIndex: ({})
+  property var pendingIcons: ({})
+  property var pendingIconScores: ({})
+
+  function iconScanScript() {
+    return [
+      'dirs="$HOME/.icons $HOME/.local/share/icons /etc/profiles/per-user/${USER:-thomas}/share/icons /run/current-system/sw/share/icons";',
+      'IFS=":"; for d in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do dirs="$dirs $d/icons"; done; unset IFS;',
+      'seen="";',
+      'for base in $dirs; do',
+      '  [ -d "$base" ] || continue;',
+      '  case " $seen " in *" $base "*) continue ;; esac;',
+      '  seen="$seen $base";',
+      '  find -L "$base" -maxdepth 5 \\( -path "*/apps/*" -o -path "*/devices/*" \\) \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null || true;',
+      'done;',
+      'for pix in "/etc/profiles/per-user/${USER:-thomas}/share/pixmaps" /run/current-system/sw/share/pixmaps /usr/share/pixmaps; do',
+      '  [ -d "$pix" ] && find -L "$pix" -maxdepth 1 \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null || true;',
+      'done'
+    ].join(" ")
+  }
+
+  function recordIconCandidate(rawPath) {
+    var path = String(rawPath || "").trim()
+    if (!path) return
+    var slash = path.lastIndexOf("/")
+    var file = slash >= 0 ? path.slice(slash + 1) : path
+    var dot = file.lastIndexOf(".")
+    var name = dot > 0 ? file.slice(0, dot) : file
+    if (!name) return
+    var score = DockModel.scoreIconPath(path, root.homeDir)
+    var prev = root.pendingIconScores[name]
+    if (prev === undefined || score > prev) {
+      root.pendingIconScores[name] = score
+      root.pendingIcons[name] = path
+    }
+  }
+
+  Process {
+    id: iconScanProc
+    command: ["bash", "-c", root.iconScanScript()]
+    stdout: SplitParser {
+      onRead: function(line) { root.recordIconCandidate(line) }
+    }
+    onStarted: {
+      root.pendingIcons = ({})
+      root.pendingIconScores = ({})
+    }
+    onExited: {
+      root.iconIndex = root.pendingIcons
+    }
+  }
+
+  Timer {
+    id: iconScanDebounce
+    interval: 750
+    onTriggered: if (!iconScanProc.running) iconScanProc.running = true
+  }
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() { iconScanDebounce.restart() }
+  }
 
   FileView {
     id: userConfigFile
@@ -36,19 +104,15 @@ Item {
       var parsed = JSON.parse(raw)
       root.parsedDockConfig = parsed && Util.isPlainObject(parsed.dock) ? parsed.dock : ({})
     } catch (e) {
-      // Ignore partial writes; FileView will reload on atomic completion.
+      // Ignore transient partial reads; FileView reloads on atomic completion.
     }
   }
 
-  readonly property var appLibrary: shell ? shell.appLibrary : null
   readonly property var dockConfig: parsedDockConfig || ({})
   readonly property string position: DockModel.normalizePosition(dockConfig.position)
   readonly property bool vertical: DockModel.isVertical(position)
-  // Auto-hide at the screen edge by default (macOS Dock behavior), unless
-  // explicitly turned off via `omarchy-dock autohide off` (`autohide: false`).
   readonly property bool autohide: dockConfig.autohide !== false
   readonly property bool allWorkspaces: dockConfig.allWorkspaces !== false
-  readonly property bool appsOpened: appGrid.opened
 
   property var order: []
   property var pendingPins: null
@@ -171,25 +235,49 @@ Item {
     return root.entryForAppId(item.key)
   }
 
+  function resolveIconName(iconName) {
+    var value = String(iconName || "").trim()
+    if (!value) return Quickshell.iconPath("application-x-executable", true)
+    if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
+    if (value.charAt(0) === "/") return Util.fileUrl(value)
+    var indexed = root.iconIndex[value]
+    if (indexed) return Util.fileUrl(indexed)
+    var themed = Quickshell.iconPath(value, true)
+    if (themed && themed.length > 0) return themed
+    return Quickshell.iconPath("application-x-executable", true)
+  }
+
   function iconFor(item) {
     var entry = entryFor(item)
     var icon = entry && entry.icon ? entry.icon : (item ? item.key : "")
-    return root.appLibrary ? root.appLibrary.iconSource(icon) : Quickshell.iconPath(icon, true)
+    return root.resolveIconName(icon)
   }
 
   function labelFor(item) {
     if (!item) return ""
     var entry = entryFor(item)
-    if (entry) {
-      var entryTitle = root.appLibrary ? root.appLibrary.entryName(entry) : String(entry.name || "")
-      if (entryTitle) return entryTitle
-    }
+    if (entry && entry.name) return String(entry.name)
     return DockModel.humanizeAppId(item.key)
   }
 
   function spacesLabelFor(item) {
     if (!item || !item.windows || item.windows.length === 0) return ""
     return DockModel.workspaceSummary(item.windows)
+  }
+
+  function terminalCommand(entry) {
+    if (!entry || !entry.runInTerminal) return []
+    return (entry.command || []).filter(function(word) { return !/^%[a-zA-Z]$/.test(String(word)) })
+  }
+
+  function launchEntry(entry) {
+    if (!entry || !entry.id) return
+    var cmd = root.terminalCommand(entry)
+    if (cmd.length > 0) {
+      Util.execDetached("omarchy-launch-tui " + cmd.map(function(w) { return Util.shellQuote(w) }).join(" "))
+      return
+    }
+    Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(String(entry.id) + ".desktop"))
   }
 
   function launch(item) {
@@ -199,10 +287,6 @@ Item {
     next[item.key] = { at: Date.now(), windows: item.windows.length }
     root.launches = next
     root.launchEntry(entry)
-  }
-
-  function launchEntry(entry) {
-    if (entry && root.appLibrary) root.appLibrary.launch(entry.id, entry.name)
   }
 
   function activate(item) {
@@ -220,8 +304,6 @@ Item {
       root.bringForward(item.windows[index])
   }
 
-  // Focus the selected window — switching Hyprland to the Space where that
-  // window lives and raising it to the top of the stack.
   function bringForward(window) {
     var address = String(window.address || "")
     if (!address) {
@@ -252,18 +334,6 @@ Item {
     if (!item) return
     var windows = item.windows.slice()
     for (var i = 0; i < windows.length; i++) windows[i].toplevel.close()
-  }
-
-  function openApps() {
-    appGrid.open()
-  }
-
-  function closeApps() {
-    appGrid.close()
-  }
-
-  function toggleApps() {
-    appGrid.toggle()
   }
 
   readonly property var pinnedKeys: root.pendingPins || DockModel.pinnedIds(root.dockConfig)
@@ -301,11 +371,6 @@ Item {
       root.pinnedKeys.forEach(function(other) { pinned[other] = true })
       if (pinned[key]) root.savePins(DockModel.pinsInOrder(root.order, pinned, root.pinnedKeys))
     }
-  }
-
-  function pinAt(key, index) {
-    var from = root.shownKeys().indexOf(key)
-    root.placeAt(key, from >= 0 && from < index ? index - 1 : index)
   }
 
   function setPinned(key, pinned) {
@@ -357,6 +422,7 @@ Item {
   }
 
   Component.onCompleted: {
+    iconScanProc.running = true
     reloadDockConfig()
     refresh()
     syncItemModel()
@@ -392,34 +458,6 @@ Item {
     target: "th0rgal.macos-dock"
 
     function refresh(): void { root.refresh() }
-    function apps(): void { appGrid.toggle() }
-  }
-
-  function dockOn(screen) {
-    var windows = docks.instances
-    for (var i = 0; i < windows.length; i++) {
-      if (windows[i].screen === screen) return windows[i]
-    }
-    return null
-  }
-
-  function moveExternalDrag(screen, x, y) {
-    var windows = docks.instances
-    for (var i = 0; i < windows.length; i++) {
-      if (windows[i].screen === screen) windows[i].moveExternalDrag(x, y)
-      else windows[i].endExternalDrag()
-    }
-  }
-
-  function dropExternalDrag(screen, x, y, key) {
-    var target = root.dockOn(screen)
-    if (target) target.dropExternalDrag(x, y, key)
-    root.endExternalDrag()
-  }
-
-  function endExternalDrag() {
-    var windows = docks.instances
-    for (var i = 0; i < windows.length; i++) windows[i].endExternalDrag()
   }
 
   Variants {
@@ -434,11 +472,5 @@ Item {
         dock: root
       }
     }
-  }
-
-  AppGrid {
-    id: appGrid
-    appLibrary: root.appLibrary
-    dock: root
   }
 }

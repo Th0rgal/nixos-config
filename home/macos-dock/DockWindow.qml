@@ -7,9 +7,9 @@ import qs.Commons as Commons
 import qs.Ui
 import "DockModel.js" as DockModel
 
-// Per-screen macOS-style frosted glass dock window. Stays mapped with a thin
-// screen-edge hover strip while tucked away so revealing on bottom-edge cursor
-// contact is instantaneous and clicks pass straight through elsewhere.
+// Clean macOS-style frosted glass dock window (active & pinned apps only — no
+// launcher button). High-DPI raster PNGs decode at full native resolution with
+// GPU mipmapping; SVGs rasterize at 256x256 for Retina sharpness.
 PanelWindow {
   id: window
   Binding { target: window.contentItem; property: "LayoutMirroring.enabled"; value: Commons.I18n.rightToLeft }
@@ -22,6 +22,7 @@ PanelWindow {
   readonly property var monitor: Hyprland.monitorFor(screen)
   readonly property var workspace: monitor ? monitor.activeWorkspace : null
   readonly property int workspaceId: workspace ? workspace.id : -1
+  readonly property int appCount: dock ? dock.itemModel.count : 0
 
   readonly property int fullscreenMode: {
     var mode = 0
@@ -36,6 +37,7 @@ PanelWindow {
   }
 
   readonly property bool shown: !!dock
+    && appCount > 0
     && workspaceId >= 1
     && fullscreenMode < 2
     && (dock.allWorkspaces || dock.isFloating(workspaceId))
@@ -43,14 +45,16 @@ PanelWindow {
   readonly property bool autohide: !!dock && (dock.autohide || fullscreenMode === 1)
   property bool revealed: false
   readonly property bool menuOpen: menuItem !== null || settingsMenu
-  readonly property bool tucked: autohide && !(revealed || menuOpen || dragging || insertIndex >= 0)
+  readonly property bool tucked: autohide && !(revealed || menuOpen || dragging)
   readonly property bool contentShown: shown && !tucked
 
   readonly property int gap: Style.spacing.sm
-  readonly property int pillPadding: Style.spacing.xs
-  readonly property int iconSize: Math.round(40 * Style.fontScale)
-  readonly property int iconInset: Style.spacing.sm
-  readonly property int slotSize: iconSize + iconInset * 2 + 4
+  readonly property int pillPadX: 10
+  readonly property int pillPadTop: 8
+  readonly property int pillPadBottom: 10
+  readonly property int iconSize: Math.round(42 * Style.fontScale)
+  readonly property int slotWidth: iconSize + 12
+  readonly property int slotHeight: iconSize + 12
   readonly property real idleOpacity: 0.68
   readonly property int popupRoom: Style.spacing.popupRowHeight * 5 + Style.spacing.sm * 2 + Style.normalBorderWidth * 2 + gap * 3
   readonly property int popOrigin: position === "top" ? Item.Top
@@ -59,6 +63,7 @@ PanelWindow {
     : Item.Bottom
 
   property Item hoveredSlot: null
+  property int hoveredAppIndex: -1
   property string hoveredTitle: ""
   property string hoveredSubtitle: ""
 
@@ -69,49 +74,6 @@ PanelWindow {
   property bool animateShifts: true
   property bool hoverStale: false
   property point dropPoint
-  property int insertIndex: -1
-
-  function origin() {
-    var reserved = monitor && monitor.lastIpcObject && monitor.lastIpcObject.reserved ? monitor.lastIpcObject.reserved : [0, 0, 0, 0]
-    var left = reserved[0] || 0, top = reserved[1] || 0, right = reserved[2] || 0, bottom = reserved[3] || 0
-    var x = window.position === "right" ? screen.width - right - window.width : left
-    var y = window.position === "bottom" ? screen.height - bottom - window.height : top
-    return Qt.point(x, y)
-  }
-
-  function moveExternalDrag(screenX, screenY) {
-    var at = window.origin()
-    var point = Qt.point(screenX - at.x - body.x - window.pillPadding, screenY - at.y - body.y - window.pillPadding)
-    var reach = window.slotSize
-    var along = window.vertical ? point.y : point.x
-    var across = window.vertical ? point.x : point.y
-    var length = window.vertical ? body.height : body.width
-    var depth = window.vertical ? body.width : body.height
-    var near = along >= -window.slotSize && along <= length + window.slotSize && across >= -reach && across <= depth + reach
-    if (window.shown && window.autohide && near) window.revealed = true
-    window.insertIndex = window.shown && near ? window.slotIndexAt(point) : -1
-  }
-
-  function dropExternalDrag(screenX, screenY, key) {
-    window.moveExternalDrag(screenX, screenY)
-    window.settleShifts()
-    if (window.insertIndex >= 0 && key && window.dock) window.dock.pinAt(key, window.insertIndex)
-    window.endExternalDrag()
-  }
-
-  function endExternalDrag() {
-    window.insertIndex = -1
-    if (window.autohide) hideTimer.restart()
-  }
-
-  readonly property int separatorExtent: (window.dock && window.dock.itemModel.count > 0) ? 13 : 0
-
-  function slotIndexAt(point) {
-    var along = window.vertical ? point.y : point.x
-    var first = window.slotSize + window.separatorExtent
-    var count = window.dock ? window.dock.itemModel.count : 0
-    return Math.max(0, Math.min(count, Math.round((along - first) / window.slotSize)))
-  }
 
   property var menuItem: null
   property Item menuSlot: null
@@ -123,6 +85,7 @@ PanelWindow {
     closeMenu()
     window.revealed = false
     window.hoveredSlot = null
+    window.hoveredAppIndex = -1
   }
   Component.onCompleted: if (dock) dock.readMode(workspaceId)
 
@@ -159,23 +122,23 @@ PanelWindow {
   }
 
   function popupX(slot, popup) {
-    if (!slot) return 0
-    var center = slot.mapToItem(window.contentItem, slot.width / 2, 0).x
+    var target = slot || body
+    var center = target.mapToItem(window.contentItem, target.width / 2, 0).x
     if (window.position === "left") return body.x + body.width + window.gap
     if (window.position === "right") return body.x - window.gap - popup.width
     return Math.max(window.gap, Math.min(window.width - popup.width - window.gap, Math.round(center - popup.width / 2)))
   }
 
-  function popupY(slot, popup) {
-    if (!slot) return 0
-    var center = slot.mapToItem(window.contentItem, 0, slot.height / 2).y
-    if (window.position === "top") return body.y + body.height + window.gap
-    if (window.position === "bottom") return body.y - window.gap - popup.height
+  function popupY(slot, popup, extraLift) {
+    var lift = extraLift || 0
+    var target = slot || body
+    var center = target.mapToItem(window.contentItem, 0, target.height / 2).y
+    if (window.position === "top") return body.y + body.height + window.gap + lift
+    if (window.position === "bottom") return body.y - window.gap - lift - popup.height
     return Math.max(window.gap, Math.min(window.height - popup.height - window.gap, Math.round(center - popup.height / 2)))
   }
 
   color: "transparent"
-  // Matches Hyprland's built-in `omarchy-glass` Kawase blur layer_rule.
   WlrLayershell.namespace: "omarchy-dock"
   WlrLayershell.layer: WlrLayer.Top
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
@@ -189,8 +152,8 @@ PanelWindow {
     right: window.position !== "left"
   }
 
-  implicitWidth: window.vertical ? window.gap + window.slotSize + window.pillPadding * 2 + window.popupRoom : 0
-  implicitHeight: window.vertical ? 0 : window.gap + window.slotSize + window.pillPadding * 2 + window.popupRoom
+  implicitWidth: window.vertical ? window.gap + window.slotWidth + window.pillPadX * 2 + window.popupRoom : 0
+  implicitHeight: window.vertical ? 0 : window.gap + window.slotHeight + window.pillPadTop + window.pillPadBottom + window.popupRoom
 
   mask: Region {
     item: window.contentShown ? body : null
@@ -208,20 +171,18 @@ PanelWindow {
       if (!bodyHover.hovered && !edgeHover.hovered && !window.menuOpen && !window.dragging) {
         window.revealed = false
         window.hoveredSlot = null
+        window.hoveredAppIndex = -1
       }
     }
   }
 
-  // Broad macOS-style screen-edge strip (72% of the screen edge, centered) so
-  // moving the cursor to the bottom of the screen reveals the dock naturally
-  // without hunting for a narrow target, while keeping extreme corners free.
   Item {
     id: edgeTrigger
 
     readonly property int depth: 5
     readonly property int spanLength: window.vertical
-      ? Math.min(window.height, Math.max(body.height + window.slotSize * 2, Math.round(window.height * 0.72)))
-      : Math.min(window.width, Math.max(body.width + window.slotSize * 2, Math.round(window.width * 0.72)))
+      ? Math.min(window.height, Math.max(body.height + window.slotHeight * 2, Math.round(window.height * 0.72)))
+      : Math.min(window.width, Math.max(body.width + window.slotWidth * 2, Math.round(window.width * 0.72)))
 
     x: window.position === "left" ? 0
       : window.position === "right" ? window.width - depth
@@ -253,18 +214,34 @@ PanelWindow {
     LayoutMirroring.enabled: false
     LayoutMirroring.childrenInherit: true
 
-    width: slotsFlow.implicitWidth + window.pillPadding * 2
-    height: slotsFlow.implicitHeight + window.pillPadding * 2
-    radius: Style.cornerRadius + 8
+    width: slotsFlow.implicitWidth + window.pillPadX * 2
+    height: slotsFlow.implicitHeight + (window.vertical ? window.pillPadX * 2 : (window.pillPadTop + window.pillPadBottom))
+    radius: 18
     color: Qt.rgba(
       Commons.Color.bar.background.r,
       Commons.Color.bar.background.g,
       Commons.Color.bar.background.b,
-      0.56
+      0.62
     )
     borderSpec: Border.flat(Qt.rgba(1, 1, 1, 0.14), 1)
 
-    property real tuck: window.tucked ? (window.vertical ? width : height) + window.gap + 4 : 0
+    // Subtle specular top rim highlight matching macOS glass dock lighting.
+    Rectangle {
+      x: body.radius * 0.65
+      y: 1
+      width: Math.max(0, body.width - body.radius * 1.3)
+      height: 1
+      color: Qt.rgba(1, 1, 1, 0.08)
+    }
+
+    // Right-clicking the glass margin (or Shift+right-clicking) opens dock settings.
+    MouseArea {
+      anchors.fill: parent
+      acceptedButtons: Qt.RightButton
+      onClicked: window.openSettingsMenu(body)
+    }
+
+    property real tuck: window.tucked ? (window.vertical ? width : height) + window.gap + 8 : 0
 
     Behavior on tuck {
       id: tuckMotion
@@ -289,6 +266,7 @@ PanelWindow {
       onHoveredChanged: {
         if (!hovered) {
           window.hoveredSlot = null
+          window.hoveredAppIndex = -1
           if (window.autohide) hideTimer.restart()
         }
       }
@@ -301,24 +279,9 @@ PanelWindow {
 
     Grid {
       id: slotsFlow
-      anchors.centerIn: parent
-      columns: window.vertical ? 1 : (1 + (dockSeparator.visible ? 1 : 0) + appRepeater.count)
-
-      AppsSlot {}
-
-      Item {
-        id: dockSeparator
-        visible: appRepeater.count > 0
-        width: window.vertical ? window.slotSize : 13
-        height: window.vertical ? 13 : window.slotSize
-
-        Rectangle {
-          anchors.centerIn: parent
-          width: window.vertical ? Math.round(window.iconSize * 0.68) : 1
-          height: window.vertical ? 1 : Math.round(window.iconSize * 0.68)
-          color: Qt.rgba(1, 1, 1, 0.14)
-        }
-      }
+      x: window.pillPadX
+      y: window.vertical ? window.pillPadX : window.pillPadTop
+      columns: window.vertical ? 1 : Math.max(1, appRepeater.count)
 
       Repeater {
         id: appRepeater
@@ -329,8 +292,6 @@ PanelWindow {
     }
   }
 
-  // Floating macOS-style label pill above the hovered dock icon showing the
-  // app's name and which Space(s) it is active on.
   BorderSurface {
     id: hoverTooltip
 
@@ -345,10 +306,10 @@ PanelWindow {
     Behavior on opacity { NumberAnimation { duration: Style.duration(90); easing.type: Easing.OutCubic } }
 
     width: tooltipRow.implicitWidth + Style.spacing.md * 2
-    height: tooltipRow.implicitHeight + Style.spacing.xs * 2
+    height: tooltipRow.implicitHeight + 8
     x: window.popupX(window.hoveredSlot, hoverTooltip)
-    y: window.popupY(window.hoveredSlot, hoverTooltip)
-    radius: Math.max(6, Math.round(Style.cornerRadius * 0.8))
+    y: window.popupY(window.hoveredSlot, hoverTooltip, 4)
+    radius: 9
     color: Qt.rgba(
       Commons.Color.popups.background.r,
       Commons.Color.popups.background.g,
@@ -378,107 +339,14 @@ PanelWindow {
         textFormat: Text.PlainText
         text: "· " + window.hoveredSubtitle
         color: Commons.Color.popups.text
-        opacity: 0.62
+        opacity: 0.6
         font.family: Style.font.menuFamily
         font.pixelSize: Math.max(10, Style.font.body - 1)
       }
     }
   }
 
-  component Slot: Item {
-    id: slot
-
-    property bool hovered: mouse.containsMouse && !window.hoverStale && !window.dragging
-    property bool pressed: mouse.pressed
-    property alias mouse: mouse
-    property string tooltipTitle: ""
-    property string tooltipSubtitle: ""
-
-    width: window.slotSize
-    height: window.slotSize
-
-    onHoveredChanged: {
-      if (hovered) {
-        window.hoveredSlot = slot
-        window.hoveredTitle = slot.tooltipTitle
-        window.hoveredSubtitle = slot.tooltipSubtitle
-      } else if (window.hoveredSlot === slot) {
-        window.hoveredSlot = null
-      }
-    }
-
-    onTooltipTitleChanged: if (window.hoveredSlot === slot) window.hoveredTitle = tooltipTitle
-    onTooltipSubtitleChanged: if (window.hoveredSlot === slot) window.hoveredSubtitle = tooltipSubtitle
-
-    MouseArea {
-      id: mouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-    }
-  }
-
-  component AppsSlot: Slot {
-    id: appsSlot
-
-    tooltipTitle: "Applications"
-    tooltipSubtitle: ""
-
-    property real displayedShift: window.insertIndex >= 0 ? -window.slotSize / 2 : 0
-
-    Behavior on displayedShift {
-      enabled: window.animateShifts
-      NumberAnimation { duration: Style.duration(150); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
-    }
-
-    transform: Translate {
-      x: window.vertical ? 0 : appsSlot.displayedShift
-      y: window.vertical ? appsSlot.displayedShift : 0
-    }
-
-    mouse.onClicked: function(event) {
-      if (event.button === Qt.RightButton) {
-        window.openSettingsMenu(appsSlot)
-        return
-      }
-      window.closeMenu()
-      if (window.dock) window.dock.openApps()
-    }
-
-    Item {
-      x: window.iconInset
-      y: window.iconInset
-      width: window.iconSize
-      height: window.iconSize
-      scale: appsSlot.hovered ? 1.16 : 1
-      transformOrigin: window.popOrigin
-
-      Behavior on scale { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
-
-      Grid {
-        readonly property int square: Math.round(window.iconSize * 0.21)
-
-        anchors.centerIn: parent
-        columns: 3
-        spacing: Math.round(window.iconSize * 0.09)
-
-        Repeater {
-          model: 9
-
-          delegate: Rectangle {
-            width: parent.square
-            height: parent.square
-            radius: Math.max(1, Math.round(parent.square * 0.25))
-            color: Commons.Color.bar.text
-            opacity: 0.9
-          }
-        }
-      }
-    }
-  }
-
-  component AppSlot: Slot {
+  component AppSlot: Item {
     id: appSlot
 
     required property int index
@@ -486,6 +354,8 @@ PanelWindow {
     readonly property var modelData: window.dock ? window.dock.itemFor(key) : null
     readonly property bool launching: !!window.dock && window.dock.isLaunching(key)
     readonly property bool lifted: window.dragIndex === index
+    readonly property bool hovered: slotMouse.containsMouse && !window.hoverStale && !window.dragging
+    readonly property bool neighborHovered: !hovered && !window.dragging && window.hoveredAppIndex >= 0 && Math.abs(index - window.hoveredAppIndex) === 1
     property point pressPoint
     property bool dragged: false
     readonly property int windowCount: modelData ? modelData.windows.length : 0
@@ -499,73 +369,102 @@ PanelWindow {
     }
     property real pulse: 1
 
-    tooltipTitle: window.dock && modelData ? window.dock.labelFor(modelData) : ""
-    tooltipSubtitle: window.dock && modelData ? window.dock.spacesLabelFor(modelData) : ""
+    readonly property string tooltipTitle: window.dock && modelData ? window.dock.labelFor(modelData) : ""
+    readonly property string tooltipSubtitle: window.dock && modelData ? window.dock.spacesLabelFor(modelData) : ""
+    readonly property string resolvedIcon: window.dock && modelData ? String(window.dock.iconFor(modelData) || "") : ""
+    readonly property bool isSvgIcon: resolvedIcon.slice(-4).toLowerCase() === ".svg"
 
-    readonly property real shift: window.insertIndex >= 0 ? (index >= window.insertIndex ? 1 : -1) * window.slotSize / 2
-      : !window.dragging ? 0
+    width: window.slotWidth
+    height: window.slotHeight
+
+    onHoveredChanged: {
+      if (hovered) {
+        window.hoveredSlot = appSlot
+        window.hoveredAppIndex = appSlot.index
+        window.hoveredTitle = appSlot.tooltipTitle
+        window.hoveredSubtitle = appSlot.tooltipSubtitle
+      } else if (window.hoveredSlot === appSlot) {
+        window.hoveredSlot = null
+        window.hoveredAppIndex = -1
+      }
+    }
+
+    onTooltipTitleChanged: if (window.hoveredSlot === appSlot) window.hoveredTitle = tooltipTitle
+    onTooltipSubtitleChanged: if (window.hoveredSlot === appSlot) window.hoveredSubtitle = tooltipSubtitle
+
+    readonly property int slotSpan: window.vertical ? window.slotHeight : window.slotWidth
+    readonly property real shift: !window.dragging ? 0
       : lifted ? window.dragOffset
-      : (window.dragIndex < index && index <= window.dropIndex) ? -window.slotSize
-      : (window.dropIndex <= index && index < window.dragIndex) ? window.slotSize
+      : (window.dragIndex < index && index <= window.dropIndex) ? -slotSpan
+      : (window.dropIndex <= index && index < window.dragIndex) ? slotSpan
       : 0
     property real displayedShift: shift
 
     Behavior on displayedShift {
-      enabled: window.animateShifts && ((window.dragging && !appSlot.lifted) || window.insertIndex >= 0)
+      enabled: window.animateShifts && window.dragging && !appSlot.lifted
       NumberAnimation { duration: Style.duration(150); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     }
 
-    z: lifted ? 1 : 0
+    z: lifted ? 2 : (hovered ? 1 : 0)
 
     function bodyPoint(event) {
       return appSlot.mapToItem(body, event.x, event.y)
     }
 
-    mouse.onPressed: function(event) {
-      appSlot.dragged = false
-      if (event.button === Qt.LeftButton) appSlot.pressPoint = appSlot.bodyPoint(event)
-    }
+    MouseArea {
+      id: slotMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
 
-    mouse.onPositionChanged: function(event) {
-      if (!(appSlot.mouse.pressedButtons & Qt.LeftButton)) return
-      var point = appSlot.bodyPoint(event)
-      var delta = window.vertical ? point.y - appSlot.pressPoint.y : point.x - appSlot.pressPoint.x
-      if (Math.hypot(point.x - appSlot.pressPoint.x, point.y - appSlot.pressPoint.y) > Style.space(4)) appSlot.dragged = true
-      if (!window.dragging) {
-        if (Math.abs(delta) < Style.space(6)) return
-        window.closeMenu()
-        window.dropIndex = appSlot.index
-        window.dragIndex = appSlot.index
-      }
-      if (!appSlot.lifted) return
-      window.dragOffset = delta
-      window.dropIndex = DockModel.dropIndex(appSlot.index, delta, window.slotSize, appRepeater.count)
-    }
-
-    mouse.onReleased: function(event) {
-      if (!appSlot.lifted) return
-      window.dropPoint = appSlot.mapToItem(body, event.x, event.y)
-      var from = window.dragIndex
-      var to = window.dropIndex
-      appSlot.dragged = true
-      window.endDrag()
-      window.dock.moveItem(from, to)
-    }
-
-    mouse.onCanceled: if (appSlot.lifted) window.endDrag()
-
-    mouse.onClicked: function(event) {
-      if (appSlot.dragged) {
+      onPressed: function(event) {
         appSlot.dragged = false
-        return
+        if (event.button === Qt.LeftButton) appSlot.pressPoint = appSlot.bodyPoint(event)
       }
-      if (event.button === Qt.RightButton) {
-        window.openMenu(appSlot.modelData, appSlot)
-        return
+
+      onPositionChanged: function(event) {
+        if (!(slotMouse.pressedButtons & Qt.LeftButton)) return
+        var point = appSlot.bodyPoint(event)
+        var delta = window.vertical ? point.y - appSlot.pressPoint.y : point.x - appSlot.pressPoint.x
+        if (Math.hypot(point.x - appSlot.pressPoint.x, point.y - appSlot.pressPoint.y) > Style.space(4)) appSlot.dragged = true
+        if (!window.dragging) {
+          if (Math.abs(delta) < Style.space(6)) return
+          window.closeMenu()
+          window.dropIndex = appSlot.index
+          window.dragIndex = appSlot.index
+        }
+        if (!appSlot.lifted) return
+        window.dragOffset = delta
+        window.dropIndex = DockModel.dropIndex(appSlot.index, delta, appSlot.slotSpan, appRepeater.count)
       }
-      window.closeMenu()
-      if (event.button === Qt.MiddleButton) window.dock.launch(appSlot.modelData)
-      else window.dock.activate(appSlot.modelData)
+
+      onReleased: function(event) {
+        if (!appSlot.lifted) return
+        window.dropPoint = appSlot.mapToItem(body, event.x, event.y)
+        var from = window.dragIndex
+        var to = window.dropIndex
+        appSlot.dragged = true
+        window.endDrag()
+        window.dock.moveItem(from, to)
+      }
+
+      onCanceled: if (appSlot.lifted) window.endDrag()
+
+      onClicked: function(event) {
+        if (appSlot.dragged) {
+          appSlot.dragged = false
+          return
+        }
+        if (event.button === Qt.RightButton) {
+          if (event.modifiers & Qt.ShiftModifier) window.openSettingsMenu(appSlot)
+          else window.openMenu(appSlot.modelData, appSlot)
+          return
+        }
+        window.closeMenu()
+        if (event.button === Qt.MiddleButton) window.dock.launch(appSlot.modelData)
+        else window.dock.activate(appSlot.modelData)
+      }
     }
 
     Item {
@@ -577,33 +476,36 @@ PanelWindow {
 
       Image {
         x: Math.round((parent.width - window.iconSize) / 2)
-        y: window.iconInset - 1
+        y: Math.round((parent.height - window.iconSize) / 2) - 2
         width: window.iconSize
         height: window.iconSize
-        sourceSize: Qt.size(window.iconSize * 2, window.iconSize * 2)
-        source: window.dock && appSlot.modelData ? window.dock.iconFor(appSlot.modelData) : ""
+        // Rasterize SVGs at 256x256 for Retina crispness; decode high-DPI PNGs
+        // at native resolution with hardware trilinear mipmaps (avoiding Qt's
+        // QImageReader box-shrink aliasing on diagonal edges like Brave's lion).
+        sourceSize: appSlot.isSvgIcon ? Qt.size(256, 256) : undefined
+        source: appSlot.resolvedIcon
         fillMode: Image.PreserveAspectFit
         asynchronous: true
         smooth: true
         mipmap: true
+        antialiasing: true
         opacity: appSlot.launching ? appSlot.pulse : (appSlot.windowCount > 0 ? 1 : window.idleOpacity)
-        scale: appSlot.lifted || appSlot.hovered ? 1.16 : 1
+        scale: appSlot.lifted || appSlot.hovered ? 1.16 : (appSlot.neighborHovered ? 1.05 : 1)
         transformOrigin: window.popOrigin
 
-        Behavior on scale { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: Style.duration(130); easing.type: Easing.OutCubic } }
       }
 
-      // macOS-style active app indicator dot beneath running apps.
       Rectangle {
         visible: appSlot.windowCount > 0 || appSlot.launching
-        width: appSlot.focusedApp ? 6 : 4
+        width: appSlot.focusedApp ? 5 : 4
         height: 4
         radius: 2
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 2
+        anchors.bottomMargin: 0
         color: Commons.Color.bar.text
-        opacity: appSlot.focusedApp ? 0.95 : 0.55
+        opacity: appSlot.focusedApp ? 0.92 : 0.48
 
         Behavior on width { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
         Behavior on opacity { NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic } }
@@ -631,7 +533,7 @@ PanelWindow {
     width: Math.max(Style.space(140), menuColumn.implicitWidth) + padding * 2
     height: menuColumn.implicitHeight + padding * 2
     x: window.popupX(window.menuSlot, menu)
-    y: window.popupY(window.menuSlot, menu)
+    y: window.popupY(window.menuSlot, menu, 0)
     radius: Style.cornerRadius
     color: Commons.Color.popups.background
     borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Style.normalBorderWidth)

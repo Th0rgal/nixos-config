@@ -1,4 +1,4 @@
-// State and pure helpers for the macOS-style auto-hiding dock.
+// State, window cycling, and high-DPI icon scoring for the macOS-style dock.
 
 var POSITIONS = ["top", "bottom", "left", "right"]
 
@@ -18,8 +18,6 @@ function normalizeId(value) {
   return id
 }
 
-// Default to an empty pinned list unless the user explicitly pinned apps in
-// shell.json, so the dock cleanly reflects active apps by default.
 function pinnedIds(dockConfig) {
   var source = dockConfig && Array.isArray(dockConfig.pinned) ? dockConfig.pinned : []
   var ids = []
@@ -30,9 +28,6 @@ function pinnedIds(dockConfig) {
   return ids
 }
 
-// Include all regular windows on normal workspaces (id >= 1) and minimized
-// windows, even when an app does not ship a .desktop entry, while excluding
-// explicitly hidden NoDisplay helper entries and special scratchpads.
 function isDockWindow(window) {
   if (!window || !window.key) return false
   if (window.minimized === true) return true
@@ -62,6 +57,36 @@ function claimingEntryId(appId, entries) {
     if (list[j].runInTerminal && program.slice(program.lastIndexOf("/") + 1) === command) return list[j].id
   }
   return ""
+}
+
+// Rank candidate icon files so high-DPI PNGs (256x256 / 512x512) and scalable
+// full-color SVGs always beat tiny 16x16 / 32x32 / 48x48 icons or symbolic SVGs.
+function scoreIconPath(filePath, homeDir) {
+  var path = String(filePath || "")
+  if (!path) return -1
+  var lower = path.toLowerCase()
+  var isSvg = lower.slice(-4) === ".svg"
+  var isSymbolic = lower.indexOf("-symbolic.") >= 0 || lower.indexOf("/symbolic/") >= 0
+  if (isSymbolic) return 1
+
+  var bonus = 0
+  if (homeDir && path.indexOf(homeDir + "/") === 0) bonus += 200
+  if (path.indexOf("/hicolor/") >= 0) bonus += 100
+
+  if (isSvg) return 10000 + bonus
+
+  var sizeMatch = path.match(/\/(\d+)x(\d+)(?:@(\d+))?\//)
+  if (sizeMatch) {
+    var basePx = Math.max(parseInt(sizeMatch[1], 10) || 0, parseInt(sizeMatch[2], 10) || 0)
+    var scale = parseInt(sizeMatch[3], 10) || 1
+    var effectivePx = basePx * scale
+    if (effectivePx >= 256 && effectivePx <= 512) return 9000 + effectivePx + bonus
+    if (effectivePx > 512) return 8900 + Math.min(500, Math.round(effectivePx / 4)) + bonus
+    return effectivePx + bonus
+  }
+
+  if (path.indexOf("/pixmaps/") >= 0) return 400 + bonus
+  return 200 + bonus
 }
 
 function humanizeAppId(appId) {
@@ -160,11 +185,6 @@ function pinsInOrder(order, pinned, allPinned) {
   return result
 }
 
-// Pick the target window when clicking an app icon in the dock:
-// - If one of the app's windows is already focused, cycle deterministically
-//   across all windows of that app in Space order (1 -> 2 -> 3 -> 1).
-// - Otherwise, prefer a window on the current Space if present, then the
-//   lowest-numbered active Space, and finally minimized windows.
 function pickWindow(windows, workspaceId) {
   var list = windows || []
   if (list.length === 0) return -1

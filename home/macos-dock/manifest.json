@@ -6,14 +6,12 @@
   "author": "Thomas",
   "description": "macOS-style auto-hiding bottom dock showing active apps across all workspaces",
   "kinds": [
-    "service",
-    "menu"
+    "service"
   ],
   "omarchy": {
     "clonedFrom": "omarchy.dock"
   },
   "entryPoints": {
-    "service": "Dock.qml",
-    "menu": "AppGridProxy.qml"
+    "service": "Dock.qml"
   }
 }
