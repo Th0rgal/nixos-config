@@ -17,6 +17,11 @@
     hardening.enable = true;
     containers.enable = true;
     secrets.enable = false;
+    services.sharing = {
+      airdrop.enable = true;
+      quickshare.enable = true;
+      nearby.enable = true;
+    };
     desktop = {
       enable = true;
       user = "thomas";
@@ -30,6 +35,7 @@
         naturalScroll = false;
         scrollFactor = 0.5;
       };
+      murmure.enable = true;
       autostartTty.enable = true;
     };
     hardware.m2air = {
@@ -83,6 +89,7 @@
       gh
       libsecret
       turbo-lean
+      murmure
       orb-desktop
       notion-calendar
       antigravity-hub
@@ -114,6 +121,7 @@
       "video"
       "render"
       "audio"
+      "input"
       "networkmanager"
     ];
     shell = "/run/current-system/sw/bin/zsh";

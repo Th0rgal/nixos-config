@@ -67,6 +67,20 @@ let
     else
       null;
 
+  touchIdId = "th0rgal.touchid";
+
+  touchIdPlugin =
+    if (pkgs ? omarchnix) && (pkgs.omarchnix ? buildPlugin) then
+      pkgs.omarchnix.buildPlugin {
+        src = ./touchid;
+        postInstall = ''
+          substituteInPlace "$out/touchid-monitor.py" \
+            --replace-fail '"/run/current-system/sw/bin/gdbus"' '"${pkgs.glib.bin}/bin/gdbus"'
+        '';
+      }
+    else
+      null;
+
   workspaceWallpapersId = "th0rgal.workspace-wallpapers";
 
   workspaceWallpapersPlugin =
@@ -258,11 +272,21 @@ in
         enable = true;
       };
     }
+    // lib.optionalAttrs (touchIdPlugin != null) {
+      ${touchIdId} = {
+        package = touchIdPlugin;
+        enable = true;
+      };
+    }
     // lib.optionalAttrs (workspaceWallpapersPlugin != null) {
       ${workspaceWallpapersId} = {
         package = workspaceWallpapersPlugin;
         enable = true;
       };
+    }
+    // {
+      "omarchnix.clipboard".enable = false;
+      "omarchnix.appearance".section = "tray";
     };
 
   programs.omarchnix.shell.extraSettings = lib.mkIf (macosDockPlugin != null) {
@@ -298,6 +322,33 @@ in
       fi
     ''
   );
+
+  home.activation.minimalStatusBarLayout = config.lib.dag.entryAfter [ "omarchnixStateAndPlugins" ] ''
+    if [ -f "$HOME/.config/omarchy/shell.json" ] && [ ! -L "$HOME/.config/omarchy/shell.json" ]; then
+      tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+      ${pkgs.jq}/bin/jq '
+        def ensure_id($arr; $id):
+          if any($arr[]; (.id // .) == $id) then $arr else $arr + [{ id: $id }] end;
+        .version = 1
+        | .bar.layout.right = [
+            (.bar.layout.right // [])[]
+            | select(
+                ((.id // .) | IN("omarchy.agents", "omarchy.monitor", "omarchnix.clipboard", "omarchnix.appearance")) | not
+              )
+            | select(
+                ((.id // .) == "omarchy.indicators") | not
+              )
+          ]
+        | .bar.layout.tray = (
+            (.bar.layout.tray // [])
+            | ensure_id(.; "omarchnix.appearance")
+            | ensure_id(.; "omarchy.agents")
+            | ensure_id(.; "omarchy.monitor")
+          )
+      ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
+      chmod 0644 "$HOME/.config/omarchy/shell.json"
+    fi
+  '';
 
   wayland.windowManager.hyprland = {
     # Re-apply active runtime theme border hairline (`starship-subtle` vs `starship-subtle-light`) on `hyprctl reload`,
@@ -528,6 +579,16 @@ in
           no_anim = true;
           animation = "none";
         }
+        {
+          name = "omarchnix-touchid";
+          match = {
+            namespace = "^omarchnix-touchid$";
+          };
+          blur = true;
+          ignore_alpha = 0.15;
+          no_anim = true;
+          animation = "none";
+        }
       ];
 
       gesture = lib.mkAfter [
@@ -565,8 +626,13 @@ in
     default = "/home/thomas/Pictures/Wallpapers/bologna-dome.webp";
     workspaces = {
       "1" = "/home/thomas/Pictures/Wallpapers/singapore.webp";
-      "2" = "/home/thomas/Pictures/Wallpapers/lisbon-greenhouse-canopy-top.webp";
-      "3" = "/home/thomas/Pictures/Wallpapers/lisbon-greenhouse-canopy-bottom.webp";
+      "2" = "/home/thomas/Pictures/Wallpapers/bologna-dome.webp";
+      "3" = "/home/thomas/Pictures/Wallpapers/kazakhstan-charyn-canyon-peaks.webp";
+      "4" = "/home/thomas/Pictures/Wallpapers/shanghai-tower-twilight-spiral.webp";
+      "5" = "/home/thomas/Pictures/Wallpapers/zambezi-violet-twilight.webp";
+      "6" = "/home/thomas/Pictures/Wallpapers/spiral-brick-vault-archway.webp";
+      "7" = "/home/thomas/Pictures/Wallpapers/lisbon-greenhouse-canopy-top.webp";
+      "8" = "/home/thomas/Pictures/Wallpapers/lisbon-greenhouse-canopy-bottom.webp";
     };
   };
 
