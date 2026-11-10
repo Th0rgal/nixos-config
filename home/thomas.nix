@@ -15,23 +15,11 @@ let
     ];
   };
 
-  grim = "${pkgs.grim}/bin/grim";
-  slurp = "${pkgs.slurp}/bin/slurp";
-  wlCopy = "${pkgs.wl-clipboard}/bin/wl-copy";
   omarchyShellBin = if cfg.shell.package != null then "${cfg.shell.package}/bin" else "";
-  clipboardCmd =
-    if omarchyShellBin != "" then
-      "${omarchyShellBin}/omarchy-shell shell toggle omarchy.clipboard"
-    else
-      "omarchy-shell shell toggle omarchy.clipboard";
-  idleToggleCmd =
-    if omarchyShellBin != "" then
-      "${omarchyShellBin}/omarchy-shell idle toggle"
-    else
-      "omarchy-toggle-idle toggle";
 
   missionControlId = "io.github.joaovitor2763.mission-control";
-  omarchyShellExe = if omarchyShellBin != "" then "${omarchyShellBin}/omarchy-shell" else "omarchy-shell";
+  omarchyShellExe =
+    if omarchyShellBin != "" then "${omarchyShellBin}/omarchy-shell" else "omarchy-shell";
   mcSummonCmd = "${omarchyShellExe} shell summon ${missionControlId} '{}'";
   mcHideCmd = "${omarchyShellExe} shell hide ${missionControlId}";
   mcToggleCmd = "${omarchyShellExe} shell toggle ${missionControlId} '{}'";
@@ -120,39 +108,80 @@ in
     };
   };
 
-  # Maccy-equivalent clipboard history icon in the top-right status bar.
-  programs.omarchnix.plugins.locked = lib.optionalAttrs (clipboardBarPlugin != null) {
-    "omarchnix.clipboard" = {
-      package = clipboardBarPlugin;
-      enable = true;
-      section = "right";
+  home.sessionVariables = {
+    BROWSER = "brave";
+  };
+
+  xdg.mimeApps = {
+    enable = true;
+    defaultApplications = {
+      "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+      "x-scheme-handler/tg" = [ "org.telegram.desktop.desktop" ];
+      "x-scheme-handler/tonsite" = [ "org.telegram.desktop.desktop" ];
+      "x-scheme-handler/ton" = [ "org.telegram.desktop.desktop" ];
     };
   };
 
-  wayland.windowManager.hyprland.settings = {
-    config.input.touchpad = {
-      # Invert scroll so content goes up when fingers go up, and smooth speed (0.5x).
-      natural_scroll = lib.mkForce false;
-      scroll_factor = 0.5;
+  # Maccy-equivalent clipboard history icon in the top-right status bar
+  # + macOS-style Mission Control overlay with top Spaces strip.
+  programs.omarchnix.plugins.locked =
+    lib.optionalAttrs (clipboardBarPlugin != null) {
+      "omarchnix.clipboard" = {
+        package = clipboardBarPlugin;
+        enable = true;
+        section = "right";
+      };
+    }
+    // lib.optionalAttrs (missionControlPlugin != null) {
+      ${missionControlId} = {
+        package = missionControlPlugin;
+        enable = true;
+      };
     };
 
+  wayland.windowManager.hyprland.settings = {
+    config = {
+      input.touchpad = {
+        # Invert scroll so content goes up when fingers go up, and smooth speed (0.5x).
+        natural_scroll = lib.mkForce false;
+        scroll_factor = 0.5;
+      };
+      misc = {
+        focus_on_activate = true;
+      };
+    };
+
+    layer_rule = lib.mkAfter [
+      {
+        name = "omarchy-mission-control";
+        match = {
+          namespace = "^omarchy-mission-control$";
+        };
+        no_anim = true;
+        animation = "none";
+      }
+    ];
+
+    gesture = lib.mkAfter [
+      # macOS Mission Control: 3-finger swipe up opens, 3-finger swipe down closes.
+      {
+        fingers = 3;
+        direction = "up";
+        disable_inhibit = true;
+        action = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcSummonCmd})) end";
+      }
+      {
+        fingers = 3;
+        direction = "down";
+        disable_inhibit = true;
+        action = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcHideCmd})) end";
+      }
+    ];
+
     bind = lib.mkAfter [
-      # Window close (Cmd+W and Cmd+Q) and force-kill (Cmd+Shift+Q)
-      (mkBind "SUPER + W" "hl.dsp.window.close()")
-      (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.kill()")
-
-      # macOS-style region screenshot directly to clipboard (Ctrl+Cmd+Shift+4 and Cmd+Shift+4)
-      (mkBind "CTRL + SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-      (mkBind "CTRL + SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-      (mkBind "SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-      (mkBind "SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-
-      # Clipboard history overlay (Maccy equivalent: Cmd+Shift+V / Cmd+Ctrl+V)
-      (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
-      (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
-
-      # Stay Awake / Theine toggle (Cmd+Shift+I)
-      (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
+      # macOS Mission Control shortcuts (Ctrl+Up toggles, Ctrl+Down closes)
+      (mkBind "CTRL + up" "hl.dsp.exec_cmd(${builtins.toJSON mcToggleCmd})")
+      (mkBind "CTRL + down" "hl.dsp.exec_cmd(${builtins.toJSON mcHideCmd})")
     ];
   };
 }
