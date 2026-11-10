@@ -34,6 +34,8 @@
     };
     hardware.m2air = {
       enable = true;
+      chargeControlEndThreshold = 100;
+      chargeControlStartThreshold = null;
       touchId = {
         enable = lib.mkDefault false;
         requirePasswordAfterBoot = true;
