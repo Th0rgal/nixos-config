@@ -36,64 +36,6 @@ let
       }
     else
       null;
-
-  clipboardBarPlugin =
-    if (pkgs ? omarchnix) && (pkgs.omarchnix ? buildPlugin) then
-      pkgs.omarchnix.buildPlugin {
-        src = pkgs.runCommand "omarchnix-clipboard-bar-src" { } ''
-          mkdir -p "$out"
-          cat > "$out/manifest.json" <<'EOF'
-          {
-            "schemaVersion": 1,
-            "id": "omarchnix.clipboard",
-            "name": "Clipboard History",
-            "version": "1.0.0",
-            "author": "Omarchnix",
-            "license": "MIT",
-            "description": "Top status bar button for Omarchy clipboard history (Maccy equivalent).",
-            "kinds": [
-              "bar-widget"
-            ],
-            "entryPoints": {
-              "barWidget": "Widget.qml"
-            },
-            "barWidget": {
-              "displayName": "Clipboard",
-              "description": "Open clipboard history (Cmd+Shift+V / Cmd+Ctrl+V).",
-              "defaultSection": "right"
-            }
-          }
-          EOF
-          cat > "$out/Widget.qml" <<'EOF'
-          import QtQuick
-          import Quickshell
-          import qs.Commons
-          import qs.Ui
-
-          BarWidget {
-            id: root
-            moduleName: "omarchnix.clipboard"
-
-            implicitWidth: button.implicitWidth
-            implicitHeight: button.implicitHeight
-
-            BarIconButton {
-              id: button
-              anchors.fill: parent
-              bar: root.bar
-              text: "󰅌"
-              slotSize: Style.bar.statusSlot
-              tooltipText: "Clipboard History (Cmd+Shift+V)"
-              onPressed: function() {
-                if (root.bar) root.bar.run("omarchy-shell shell toggle omarchy.clipboard")
-              }
-            }
-          }
-          EOF
-        '';
-      }
-    else
-      null;
 in
 {
   programs.git = {
@@ -124,22 +66,13 @@ in
     };
   };
 
-  # Maccy-equivalent clipboard history icon in the top-right status bar
-  # + macOS-style Mission Control overlay with top Spaces strip.
-  programs.omarchnix.plugins.locked =
-    lib.optionalAttrs (clipboardBarPlugin != null) {
-      "omarchnix.clipboard" = {
-        package = clipboardBarPlugin;
-        enable = true;
-        section = "right";
-      };
-    }
-    // lib.optionalAttrs (missionControlPlugin != null) {
-      ${missionControlId} = {
-        package = missionControlPlugin;
-        enable = true;
-      };
+  # macOS-style Mission Control overlay with top Spaces strip.
+  programs.omarchnix.plugins.locked = lib.optionalAttrs (missionControlPlugin != null) {
+    ${missionControlId} = {
+      package = missionControlPlugin;
+      enable = true;
     };
+  };
 
   wayland.windowManager.hyprland.settings = {
     config = {
@@ -165,18 +98,25 @@ in
     ];
 
     gesture = lib.mkAfter [
-      # macOS Mission Control: 3-finger swipe up opens, 3-finger swipe down closes.
+      # macOS Mission Control: 3-finger swipe up opens immediately on gesture start,
+      # 3-finger swipe down closes immediately on gesture start.
       {
         fingers = 3;
         direction = "up";
+        scale = 1.5;
         disable_inhibit = true;
-        action = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcSummonCmd})) end";
+        action = {
+          start = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcSummonCmd})) end";
+        };
       }
       {
         fingers = 3;
         direction = "down";
+        scale = 1.5;
         disable_inhibit = true;
-        action = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcHideCmd})) end";
+        action = {
+          start = mkLuaInline "function() hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON mcHideCmd})) end";
+        };
       }
     ];
 

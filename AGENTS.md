@@ -20,7 +20,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 │   │   │   └── hardware-configuration.nix
 │   │   └── spark/             # Secondary x86_64 workstation host
 │   └── home/
-│       └── thomas.nix         # Personal Home Manager config (git identity, MIME defaults, Mission Control, clipboard bar widget)
+│       └── thomas.nix         # Personal Home Manager config (git identity, MIME defaults, Mission Control overlay & gestures)
 └── omarchnix/                 # Reusable public Omarchy-on-NixOS & M2 Air stack (github.com/Th0rgal/omarchnix)
     ├── flake.nix              # Exports nixosModules.{default,m2air-hardware}, homeManagerModules.default, templates
     ├── modules/
@@ -86,12 +86,9 @@ chmod 644 ~/.config/hypr/hyprland.lua
 hyprctl reload
 hyprctl configerrors -j
 
-# 2. Rebuild & apply Omarchy Shell (`shell.json`) live:
-SHELL_JSON=$(nix build --no-link --print-out-paths \
-  --override-input omarchnix path:/home/thomas/work/nixos/omarchnix \
-  '.#nixosConfigurations.m2air.config.home-manager.users.thomas.xdg.configFile."omarchy/shell.json".source')
-cp --remove-destination "$SHELL_JSON" ~/.config/omarchy/shell.json
-chmod 644 ~/.config/omarchy/shell.json
+# 2. Rescan & enable Omarchy Shell plugins (`~/.config/omarchy/shell.json` is a regular writable file):
+omarchy-shell shell rescanPlugins
+omarchnix plugin enable <plugin-id>
 ```
 
 ### C. Syncing `omarchnix` into `nixos-config`
@@ -115,7 +112,7 @@ git add flake.lock && git commit -m "chore(flake): update omarchnix input" && gi
 - **Copy / Paste / Cut / Select All / Undo / Redo:** `Cmd + C` / `Cmd + V` / `Cmd + X` / `Cmd + A` / `Cmd + Z` / `Cmd + Shift + Z` (automatically translates to `Ctrl+Shift+C/V` in terminals so physical `Ctrl+C` still sends `SIGINT`)
 - **Clipboard History (Maccy equivalent):** `Cmd + Shift + V` or `Cmd + Ctrl + V`, or click the **`󰅌`** icon in the top-right status bar
 - **Region Screenshot to Clipboard:** `Ctrl + Cmd + Shift + 4` (or `Cmd + Shift + 4` / `Cmd + Shift + P`)
-- **Mission Control & Spaces Overview:** **3-finger swipe up** (or `Ctrl + Up`) to open; **3-finger swipe down** (or `Ctrl + Down` / `Esc`) to close; **3-finger swipe left/right** to switch workspaces
+- **Mission Control & Spaces Overview:** **3-finger swipe up** (or `Ctrl + Up`) to open immediately on gesture start; **3-finger swipe down** (or `Ctrl + Down` / `Esc`) to close; **3-finger swipe left/right** to switch workspaces (`180px` distance, `0.15` cancel ratio, `min_speed_to_force = 5` for effortless macOS flicks)
 - **Stay Awake / Theine Toggle:** Click the coffee cup icon in the top-right status bar or press `Cmd + Shift + I`
 - **Toggle Window Floating:** `Cmd + Shift + F` or `Cmd + Option + V`
 - **Fullscreen / Maximize:** `Cmd + F` / `Cmd + M`
