@@ -166,11 +166,11 @@
         "sops-nix": "sops-nix"
       },
       "locked": {
-        "lastModified": 1794302852,
-        "narHash": "sha256-Bw5v0cu7mlS/31uTLnhChc+So9f0es1BracKCk6OQck=",
+        "lastModified": 1794308152,
+        "narHash": "sha256-JTUhs0l+xwcXR5wgpNpCHATo7wuQl3ROWuV/2+vg4Is=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "01a7b5d901ab4685190164d5a404e7422a9f64f8",
+        "rev": "6b97bdd7fc779baea48af40334dfbc6bb126ecde",
         "type": "github"
       },
       "original": {

@@ -20,7 +20,7 @@
     desktop = {
       enable = true;
       user = "thomas";
-      theme = "starship";
+      theme = "starship-subtle";
       shellBackend = "omarchy-shell";
       keyboard = {
         layout = "us";
@@ -69,6 +69,20 @@
   # Secret Service (org.freedesktop.secrets) required by Bitwarden Desktop for
   # biometric unlock alongside Polkit (`polkit-1` PAM -> `pam_fprintd.so`).
   services.gnome.gnome-keyring.enable = true;
+
+  # Keep Apple M2 ISO physical `~`/`` ` `` key next to Left Shift (<TLDE>) instead of
+  # hid_apple's automatic ISO swap, without altering Stage-1 LUKS passphrase entry.
+  systemd.tmpfiles.rules = [
+    "w /sys/module/hid_apple/parameters/iso_layout - - - - 0"
+  ];
+
+  # Wayland IME (fcitx5) so dead keys (`~`, `` ` ``, `'`, `"`, `^`) display underlined
+  # preedit in foot and Wayland apps, matching macOS U.S. International - PC.
+  i18n.inputMethod = {
+    enable = true;
+    type = "fcitx5";
+    fcitx5.waylandFrontend = true;
+  };
 
   users.users.thomas = {
     isNormalUser = true;

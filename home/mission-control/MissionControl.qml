@@ -124,16 +124,29 @@ Item {
     }
   }
 
+  function cleanAddress(address) {
+    return String(address || "").replace(/^0x/i, "")
+  }
+
+  function luaWorkspaceArg(workspace) {
+    var s = String(workspace)
+    return /^\d+$/.test(s) ? String(Number(s)) : ("'" + s + "'")
+  }
+
   function closeWindow(address) {
-    dispatch("window.close({ window = 'address:0x" + address + "' })")
+    var clean = cleanAddress(address)
+    if (!clean) return
+    dispatch("window.close({ window = 'address:0x" + clean + "' })")
   }
 
   function focusWorkspace(workspace) {
-    dispatch("focus({ workspace = '" + workspace + "' })")
+    dispatch("focus({ workspace = " + luaWorkspaceArg(workspace) + " })")
   }
 
   function moveWindow(address, workspace) {
-    dispatch("window.move({ workspace = '" + workspace + "', follow = false, window = 'address:0x" + address + "' })")
+    var clean = cleanAddress(address)
+    if (!clean) return
+    dispatch("window.move({ workspace = " + luaWorkspaceArg(workspace) + ", follow = false, window = 'address:0x" + clean + "' })")
   }
 
   // Atomically renumber workspaces in-place via temporary free IDs so split
