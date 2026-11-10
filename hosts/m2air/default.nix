@@ -50,21 +50,42 @@
   # package rather than the whole unfree set.
   nixpkgs.config.allowUnfreePackages = [ "antigravity-hub" ];
 
-  environment.systemPackages = with pkgs; [
-    brave
-    firefox
-    bitwarden-desktop
-    bitwarden-cli
-    telegram-desktop
-    age
-    restic
-    rclone
-    gh
-    libsecret
-    orb-desktop
-    notion-calendar
-    antigravity-hub
-  ];
+  environment.systemPackages =
+    let
+      # Enable Chromium zero-copy tile rasterizer on Apple Silicon unified memory
+      # without re-unpacking the binary-cached Brave derivation.
+      braveZeroCopy = pkgs.symlinkJoin {
+        name = "brave-${pkgs.brave.version}";
+        paths = [ pkgs.brave ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          wrapProgram "$out/bin/brave" --add-flags "--enable-zero-copy"
+          for desktop in "$out/share/applications/"*.desktop; do
+            if [ -L "$desktop" ]; then
+              cp --remove-destination "$(readlink -f "$desktop")" "$desktop"
+              substituteInPlace "$desktop" --replace-quiet "${pkgs.brave}/bin/brave" "$out/bin/brave"
+            fi
+          done
+        '';
+        inherit (pkgs.brave) meta;
+      };
+    in
+    with pkgs;
+    [
+      braveZeroCopy
+      firefox
+      bitwarden-desktop
+      bitwarden-cli
+      telegram-desktop
+      age
+      restic
+      rclone
+      gh
+      libsecret
+      orb-desktop
+      notion-calendar
+      antigravity-hub
+    ];
 
   # Secret Service (org.freedesktop.secrets) required by Bitwarden Desktop for
   # biometric unlock alongside Polkit (`polkit-1` PAM -> `pam_fprintd.so`).

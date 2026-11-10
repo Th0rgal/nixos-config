@@ -174,6 +174,7 @@ in
   programs.omarchnix.shell.extraSettings = lib.mkIf (macosDockPlugin != null) {
     disabledPlugins = [
       "omarchy.dock"
+      "omarchy.dev-gallery"
     ]
     ++ lib.optional (workspaceWallpapersPlugin != null) "omarchy.background";
     dock = {
@@ -192,6 +193,7 @@ in
           | .disabledPlugins = (
               (.disabledPlugins // [])
               | if index("omarchy.dock") then . else . + ["omarchy.dock"] end
+              | if index("omarchy.dev-gallery") then . else . + ["omarchy.dev-gallery"] end
               ${lib.optionalString (
                 workspaceWallpapersPlugin != null
               ) ''| if index("omarchy.background") then . else . + ["omarchy.background"] end''}

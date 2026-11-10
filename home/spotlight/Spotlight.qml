@@ -425,6 +425,10 @@ Item {
     onContentRevealedChanged: {
       if (contentRevealed && root.opened) {
         searchInput.forceActiveFocus()
+      } else if (!contentRevealed && !root.opened) {
+        resultsModel.clear()
+        root.filterText = ""
+        if (searchInput.text !== "") searchInput.text = ""
       }
     }
 
@@ -750,6 +754,7 @@ Item {
             fillMode: Image.PreserveAspectFit
             smooth: true
             mipmap: true
+            cache: false
             asynchronous: false
           }
 

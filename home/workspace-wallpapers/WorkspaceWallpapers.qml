@@ -72,11 +72,26 @@ Item {
     }
   }
 
+  property string linkedBackgroundPath: ""
   property string pendingLinkTarget: ""
+  property var polarityMap: ({})
+  property string probedPathsKey: ""
 
-  function syncCurrentBackgroundLink(targetPath) {
+  function shouldSyncBackgroundLink(targetPath) {
+    var clean = String(targetPath || "").trim()
+    if (!clean) return false
+    if (!linkedBackgroundPath) return true
+    if (clean === linkedBackgroundPath) return false
+    var nextPol = polarityMap[clean]
+    var curPol = polarityMap[linkedBackgroundPath]
+    if (nextPol && curPol) return nextPol !== curPol
+    return false
+  }
+
+  function syncCurrentBackgroundLink(targetPath, forceSync) {
     var clean = String(targetPath || "").trim()
     if (!clean) return
+    if (!forceSync && !shouldSyncBackgroundLink(clean)) return
     pendingLinkTarget = clean
     if (!linkProc.running) startLinkUpdate()
   }
@@ -85,13 +100,98 @@ Item {
     var nextTarget = pendingLinkTarget
     if (!nextTarget) return
     pendingLinkTarget = ""
+    linkProc.targetWritten = nextTarget
     linkProc.command = ["ln", "-sfn", nextTarget, root.backgroundLink]
     linkProc.running = true
   }
 
+  function refreshPolarities() {
+    var paths = root.allPaths || []
+    var key = paths.join("\n")
+    if (!key || key === root.probedPathsKey) return
+    if (polarityProc.running) return
+    root.probedPathsKey = key
+    polarityProc.pathsSnapshot = paths.slice()
+    polarityProc.command = [
+      "bash",
+      "-c",
+      [
+        'cur=$(readlink -f -- "$1" 2>/dev/null || true)',
+        'printf "LINK\\t%s\\n" "$cur"',
+        'shift',
+        'add_pol() {',
+        '  local p="$1"',
+        '  [ -f "$p" ] || return 0',
+        '  local d l',
+        '  d=$(omarchy-bar-text-color top 28 "#e6edf3" "#0b0e14" --background "$p" 2>/dev/null || echo "#e6edf3")',
+        '  l=$(omarchy-bar-text-color top 28 "#1f2328" "#ffffff" --background "$p" 2>/dev/null || echo "#1f2328")',
+        '  printf "POL\\t%s\\t%s|%s\\n" "$p" "$d" "$l"',
+        '}',
+        '[ -n "$cur" ] && add_pol "$cur"',
+        'for p in "$@"; do',
+        '  [ "$p" = "$cur" ] && continue',
+        '  add_pol "$p"',
+        'done'
+      ].join("\n"),
+      "_",
+      root.backgroundLink
+    ].concat(paths)
+    polarityProc.running = true
+  }
+
+  onAllPathsChanged: refreshPolarities()
+
+  Component.onCompleted: refreshPolarities()
+
+  Process {
+    id: polarityProc
+    property var pathsSnapshot: []
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var lines = String(text || "").split("\n")
+        var nextPol = {}
+        for (var k in root.polarityMap) nextPol[k] = root.polarityMap[k]
+        var detectedLink = root.linkedBackgroundPath
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i]
+          if (!line) continue
+          var parts = line.split("\t")
+          if (parts[0] === "LINK") {
+            detectedLink = String(parts[1] || "").trim()
+          } else if (parts[0] === "POL" && parts.length >= 3) {
+            nextPol[parts[1]] = parts[2]
+          }
+        }
+        root.polarityMap = nextPol
+        if (detectedLink) {
+          root.linkedBackgroundPath = detectedLink
+        }
+        var activeTarget = root.pathForWorkspace(
+          (Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace && Hyprland.focusedMonitor.activeWorkspace.id > 0)
+            ? Hyprland.focusedMonitor.activeWorkspace.id
+            : 1
+        )
+        if (!root.linkedBackgroundPath) {
+          root.syncCurrentBackgroundLink(activeTarget, true)
+        } else if (root.shouldSyncBackgroundLink(activeTarget)) {
+          root.syncCurrentBackgroundLink(activeTarget, true)
+        }
+      }
+    }
+    onExited: {
+      var latestKey = (root.allPaths || []).join("\n")
+      if (latestKey !== root.probedPathsKey) root.refreshPolarities()
+    }
+  }
+
   Process {
     id: linkProc
-    onExited: {
+    property string targetWritten: ""
+    onExited: function(exitCode) {
+      if (exitCode === 0 && linkProc.targetWritten !== "") {
+        root.linkedBackgroundPath = linkProc.targetWritten
+      }
       if (root.pendingLinkTarget !== "") root.startLinkUpdate()
     }
   }
