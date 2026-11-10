@@ -14,7 +14,7 @@ function isVertical(position) {
 
 function normalizeId(value) {
   var id = String(value || "").trim()
-  if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
+  if (id.slice(-16) === ".desktop.desktop") return id.slice(0, -8)
   return id
 }
 

@@ -138,8 +138,12 @@ Item {
 
   readonly property var items: {
     var appsRevision = DesktopEntries.applications.values.length
-    var pinned = (root.pendingPins || DockModel.pinnedIds(dockConfig)).filter(function(id) {
-      return !!DesktopEntries.byId(id)
+    var pinned = (root.pendingPins || DockModel.pinnedIds(dockConfig)).map(function(id) {
+      if (DesktopEntries.byId(id)) return id
+      if (id.slice(-8) === ".desktop" && DesktopEntries.byId(id.slice(0, -8))) return id.slice(0, -8)
+      return ""
+    }).filter(function(id) {
+      return id.length > 0
     })
 
     var windows = []
@@ -277,7 +281,7 @@ Item {
       Util.execDetached("omarchy-launch-tui " + cmd.map(function(w) { return Util.shellQuote(w) }).join(" "))
       return
     }
-    Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(String(entry.id) + ".desktop"))
+    Quickshell.execDetached(["uwsm-app", "--", String(entry.id) + ".desktop"])
   }
 
   function launch(item) {
