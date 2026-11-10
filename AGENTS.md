@@ -107,16 +107,18 @@ git add flake.lock && git commit -m "chore(flake): update omarchnix input" && gi
 
 ## 4. Hardware & Desktop Reference (`m2air`)
 
-### Keyboard Shortcuts (`Cmd` = `SUPER`)
+### Keyboard Shortcuts (`Cmd` = `SUPER` for apps, `Ctrl + Cmd` = `CTRL + SUPER` for WM)
 - **Close / Force-Kill Window:** `Cmd + W` or `Cmd + Q` / `Cmd + Shift + Q`
 - **Copy / Paste / Cut / Select All / Undo / Redo:** `Cmd + C` / `Cmd + V` / `Cmd + X` / `Cmd + A` / `Cmd + Z` / `Cmd + Shift + Z` (automatically translates to `Ctrl+Shift+C/V` in terminals so physical `Ctrl+C` still sends `SIGINT`)
 - **Clipboard History (Maccy equivalent):** `Cmd + Shift + V` or `Cmd + Ctrl + V`, or click the **`󰅌`** icon in the top-right status bar
-- **Region Screenshot to Clipboard:** `Ctrl + Cmd + Shift + 4` (or `Cmd + Shift + 4` / `Cmd + Shift + P`)
-- **Mission Control & Spaces Overview:** **3-finger swipe up** (or `Ctrl + Up`) to open immediately on gesture start; **3-finger swipe down** (or `Ctrl + Down` / `Esc`) to close; **3-finger swipe left/right** to switch workspaces (`180px` distance, `0.15` cancel ratio, `min_speed_to_force = 5` for effortless macOS flicks)
+- **Region Screenshot to Clipboard:** `Ctrl + Cmd + Shift + 4` (or `Cmd + Shift + 4` / `Ctrl + Cmd + Shift + P`)
+- **Mission Control & Spaces Overview:** **3-finger swipe up** (or `Ctrl + Up`) to open immediately on gesture start; **3-finger swipe down** (or `Ctrl + Down` / `Esc`) to close; **3-finger swipe left/right** or `Ctrl + 1..0` to switch workspaces (`Ctrl + Shift + 1..0` / `Ctrl + Cmd + 1..0` to move windows)
 - **Stay Awake / Theine Toggle:** Click the coffee cup icon in the top-right status bar or press `Cmd + Shift + I`
-- **Toggle Window Floating:** `Cmd + Shift + F` or `Cmd + Option + V`
-- **Fullscreen / Maximize:** `Cmd + F` / `Cmd + M`
-- **App Launcher / Terminal / Lock:** `Cmd + Space` / `Cmd + Return` / `Cmd + Escape`
+- **Window Focus / Move (Tiling WM):** `Ctrl + Cmd + H/J/K/L` (or `Arrows`) to focus; `Ctrl + Cmd + Shift + H/J/K/L` (or `Arrows`) to move
+- **Toggle Window Floating / Split / Pseudo:** `Ctrl + Cmd + Shift + F` or `Cmd + Option + V` (float), `Ctrl + Cmd + E` (split), `Ctrl + Cmd + P` (pseudo)
+- **Fullscreen / Maximize:** `Ctrl + Cmd + F` (fullscreen) / `Cmd + M` or `Ctrl + Cmd + M` (maximize)
+- **Scratchpad:** `` Cmd + ` `` or `Ctrl + Cmd + S` (`Shift` moves window to scratchpad)
+- **App Launcher / Orb / Terminal / Lock:** `Cmd + Space` (`Ctrl + Cmd + Space` expanded) / `Ctrl + Cmd + O` / `Cmd + Return` / `Cmd + Escape`
 
 ### Battery Charge Cap (`macsmc-battery`)
 - Default in NixOS config: **`100%`** (`omarchnix.hardware.m2air.chargeControlEndThreshold = 100;`).
