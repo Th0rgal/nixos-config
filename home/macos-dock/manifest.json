@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "th0rgal.macos-dock",
+  "name": "macOS Auto-Hide Dock",
+  "version": "1.0.0",
+  "author": "Thomas",
+  "description": "macOS-style auto-hiding bottom dock showing active apps across all workspaces",
+  "kinds": [
+    "service",
+    "menu"
+  ],
+  "omarchy": {
+    "clonedFrom": "omarchy.dock"
+  },
+  "entryPoints": {
+    "service": "Dock.qml",
+    "menu": "AppGridProxy.qml"
+  }
+}

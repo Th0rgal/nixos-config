@@ -24,15 +24,33 @@ let
   mcHideCmd = "${omarchyShellExe} shell hide ${missionControlId}";
   mcToggleCmd = "${omarchyShellExe} shell toggle ${missionControlId} '{}'";
 
+  upstreamMissionControlSrc = pkgs.fetchFromGitHub {
+    owner = "joaovitor2763";
+    repo = "omarchy-mission-control";
+    rev = "86c3d652408fd0a84ec84e6f0e179647952611db";
+    hash = "sha256-a4teoN7+IPaFw1xcYlbO3p2G/GyHghtQcERYT+pwotc=";
+  };
+
+  missionControlSrc = pkgs.runCommand "omarchy-mission-control-src" { } ''
+    mkdir -p "$out"
+    cp -r --no-preserve=mode,ownership "${upstreamMissionControlSrc}/." "$out/"
+    cp --no-preserve=mode,ownership "${./mission-control}/"*.qml "$out/"
+  '';
+
   missionControlPlugin =
     if (pkgs ? omarchnix) && (pkgs.omarchnix ? buildPlugin) then
       pkgs.omarchnix.buildPlugin {
-        src = pkgs.fetchFromGitHub {
-          owner = "joaovitor2763";
-          repo = "omarchy-mission-control";
-          rev = "86c3d652408fd0a84ec84e6f0e179647952611db";
-          hash = "sha256-a4teoN7+IPaFw1xcYlbO3p2G/GyHghtQcERYT+pwotc=";
-        };
+        src = missionControlSrc;
+      }
+    else
+      null;
+
+  macosDockId = "th0rgal.macos-dock";
+
+  macosDockPlugin =
+    if (pkgs ? omarchnix) && (pkgs.omarchnix ? buildPlugin) then
+      pkgs.omarchnix.buildPlugin {
+        src = ./macos-dock;
       }
     else
       null;
@@ -66,13 +84,43 @@ in
     };
   };
 
-  # macOS-style Mission Control overlay with top Spaces strip.
-  programs.omarchnix.plugins.locked = lib.optionalAttrs (missionControlPlugin != null) {
-    ${missionControlId} = {
-      package = missionControlPlugin;
-      enable = true;
+  # macOS-style Mission Control overlay with top Spaces strip + auto-hide bottom Dock.
+  programs.omarchnix.plugins.locked =
+    lib.optionalAttrs (missionControlPlugin != null) {
+      ${missionControlId} = {
+        package = missionControlPlugin;
+        enable = true;
+      };
+    }
+    // lib.optionalAttrs (macosDockPlugin != null) {
+      ${macosDockId} = {
+        package = macosDockPlugin;
+        enable = true;
+      };
+    };
+
+  programs.omarchnix.shell.extraSettings = lib.mkIf (macosDockPlugin != null) {
+    disabledPlugins = [ "omarchy.dock" ];
+    dock = {
+      position = "bottom";
+      autohide = true;
+      allWorkspaces = true;
     };
   };
+
+  home.activation.macosDockShellConfig = lib.mkIf (macosDockPlugin != null) (
+    config.lib.dag.entryAfter [ "omarchnixStateAndPlugins" ] ''
+      if [ -f "$HOME/.config/omarchy/shell.json" ] && [ ! -L "$HOME/.config/omarchy/shell.json" ]; then
+        tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+        ${pkgs.jq}/bin/jq '
+          .version = 1
+          | .disabledPlugins = ((.disabledPlugins // []) | if index("omarchy.dock") then . else . + ["omarchy.dock"] end)
+          | .dock = ((.dock // {}) | .position = (.position // "bottom") | .autohide = (if has("autohide") then .autohide else true end) | .allWorkspaces = (.allWorkspaces // true))
+        ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
+        chmod 0644 "$HOME/.config/omarchy/shell.json"
+      fi
+    ''
+  );
 
   wayland.windowManager.hyprland.settings = {
     config = {
