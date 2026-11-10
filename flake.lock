@@ -1,0 +1,307 @@
+{
+  "nodes": {
+    "apple-silicon": {
+      "inputs": {
+        "flake-compat": "flake-compat_2",
+        "nixpkgs": [
+          "omarchnix",
+          "nixos-aurora",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791830269,
+        "narHash": "sha256-A3JRH8qkp+NrP3sSwfutu7nZ5AclDY/HDmn/xDxduM4=",
+        "owner": "nix-community",
+        "repo": "nixos-apple-silicon",
+        "rev": "12cd234285d3037cedfab979aa70b75284a59afc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nixos-apple-silicon",
+        "rev": "12cd234285d3037cedfab979aa70b75284a59afc",
+        "type": "github"
+      }
+    },
+    "apple-silicon-support": {
+      "inputs": {
+        "flake-compat": "flake-compat",
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793857696,
+        "narHash": "sha256-i83A7/noFI74D4MMylB1jZTFGD/GUvixkussVLNloo8=",
+        "owner": "nix-community",
+        "repo": "nixos-apple-silicon",
+        "rev": "b980a33fcda55d2d39a64e1f8df7c03e5ab33aba",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nixos-apple-silicon",
+        "type": "github"
+      }
+    },
+    "flake-compat": {
+      "locked": {
+        "lastModified": 1761640442,
+        "narHash": "sha256-AtrEP6Jmdvrqiv4x2xa5mrtaIp3OEe8uBYCDZDS+hu8=",
+        "owner": "nix-community",
+        "repo": "flake-compat",
+        "rev": "4a56054d8ffc173222d09dad23adf4ba946c8884",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
+    "flake-compat_2": {
+      "locked": {
+        "lastModified": 1761640442,
+        "narHash": "sha256-AtrEP6Jmdvrqiv4x2xa5mrtaIp3OEe8uBYCDZDS+hu8=",
+        "owner": "nix-community",
+        "repo": "flake-compat",
+        "rev": "4a56054d8ffc173222d09dad23adf4ba946c8884",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793757180,
+        "narHash": "sha256-gyV7AtCwLnOImcrfSETP4J3Ie96bz19DY47B7m7Y3HM=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "b787c48e2ec57a9d098f5c2721882a3bc1e16f97",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
+    "nixos-aurora": {
+      "inputs": {
+        "apple-silicon": "apple-silicon",
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794143162,
+        "narHash": "sha256-5HG/3Q0wvhgHN6Uqho34Bo2FAtIHX1xBMWz+/tlRm/8=",
+        "owner": "aurora-silicon",
+        "repo": "nixos-aurora",
+        "rev": "4b025a0cfd35bede6bc87a50fcce6e2a95170f39",
+        "type": "github"
+      },
+      "original": {
+        "owner": "aurora-silicon",
+        "repo": "nixos-aurora",
+        "rev": "4b025a0cfd35bede6bc87a50fcce6e2a95170f39",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1793726008,
+        "narHash": "sha256-jQp1wKvbwWdLBASTXkSi/VYmDJ5AbBi1WvcMt9HWJC8=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "1d060086d60cb76a40cf37109f979d88a5bd6396",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-toolchains": {
+      "locked": {
+        "lastModified": 1793726008,
+        "narHash": "sha256-jQp1wKvbwWdLBASTXkSi/VYmDJ5AbBi1WvcMt9HWJC8=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "1d060086d60cb76a40cf37109f979d88a5bd6396",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "omarchnix": {
+      "inputs": {
+        "apple-silicon-support": "apple-silicon-support",
+        "home-manager": "home-manager",
+        "nixos-aurora": "nixos-aurora",
+        "nixpkgs": "nixpkgs",
+        "nixpkgs-toolchains": "nixpkgs-toolchains",
+        "omarchy": "omarchy",
+        "omarchy-plugin-marketplace": "omarchy-plugin-marketplace",
+        "omarchy-plugin-opencode-usage": "omarchy-plugin-opencode-usage",
+        "orb": "orb",
+        "sops-nix": "sops-nix"
+      },
+      "locked": {
+        "lastModified": 1794295923,
+        "narHash": "sha256-jvgq+ZzN8ElzuMt97FRvaXIaqMiZYRXz8JkD9/ejClo=",
+        "owner": "Th0rgal",
+        "repo": "omarchnix",
+        "rev": "7b495cb80d5b449d2b7d343b0199384941d2cff3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "omarchnix",
+        "type": "github"
+      }
+    },
+    "omarchy": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793854933,
+        "narHash": "sha256-6GIMRXFOa0YAyZRO71oOtTY4mRWAvK/oRBtfM4llfBo=",
+        "owner": "omacom",
+        "repo": "omarchy",
+        "rev": "6194f4606c585da8b839b87df9120b7d796afedf",
+        "type": "github"
+      },
+      "original": {
+        "owner": "omacom",
+        "repo": "omarchy",
+        "rev": "6194f4606c585da8b839b87df9120b7d796afedf",
+        "type": "github"
+      }
+    },
+    "omarchy-plugin-marketplace": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793929948,
+        "narHash": "sha256-3oDxGmNVz/3g99ojf7hjMs6wvzkykWRQ+xKvQD4vLMM=",
+        "owner": "omacom",
+        "repo": "omarchy-plugin-marketplace",
+        "rev": "d2a854554c778b06911f6c878d9ea0d4522c4a14",
+        "type": "github"
+      },
+      "original": {
+        "owner": "omacom",
+        "repo": "omarchy-plugin-marketplace",
+        "rev": "d2a854554c778b06911f6c878d9ea0d4522c4a14",
+        "type": "github"
+      }
+    },
+    "omarchy-plugin-opencode-usage": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786899516,
+        "narHash": "sha256-pVrtfcRj/kn9LOYp+pR7Mh3CzOQtA6Eq8SLtBbttiLA=",
+        "owner": "JJDizz1L",
+        "repo": "dizziee.opencode-model-usage",
+        "rev": "95a0f856d704e12915888dca7ec093e5df3009d9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "JJDizz1L",
+        "repo": "dizziee.opencode-model-usage",
+        "rev": "95a0f856d704e12915888dca7ec093e5df3009d9",
+        "type": "github"
+      }
+    },
+    "orb": {
+      "inputs": {
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794254365,
+        "narHash": "sha256-kTMBA7AK5s6gdHT+2EJXWjCTp1FAov8VkwH5Rd+9jwM=",
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "17a5c5f98a46dea938a4c4cf03393240c72a4b2a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "apple-silicon-support": [
+          "omarchnix",
+          "apple-silicon-support"
+        ],
+        "home-manager": [
+          "omarchnix",
+          "home-manager"
+        ],
+        "nixos-aurora": [
+          "omarchnix",
+          "nixos-aurora"
+        ],
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ],
+        "omarchnix": "omarchnix",
+        "orb": [
+          "omarchnix",
+          "orb"
+        ],
+        "sops-nix": [
+          "omarchnix",
+          "sops-nix"
+        ]
+      }
+    },
+    "sops-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793657466,
+        "narHash": "sha256-GoOvpdsjO5hqZuO6T6ok9u6sJEjO0iPli2zRr9oNUNw=",
+        "owner": "Mic92",
+        "repo": "sops-nix",
+        "rev": "b18e01ce148eb3efff5de2f2d3181ca53b2b2a54",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Mic92",
+        "repo": "sops-nix",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
