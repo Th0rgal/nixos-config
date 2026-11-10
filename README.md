@@ -18,10 +18,14 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 ## macOS-Style Shortcuts & Ergonomics (`m2air`)
 
 - **Close / Kill Window:** `Cmd + Q` (`SUPER + Q`) or `Cmd + W` (`SUPER + W`), force-kill with `Cmd + Shift + Q` (`SUPER + SHIFT + Q`).
+- **Universal Copy / Paste / Cut / Select All / Undo / Redo:** `Cmd + C` / `Cmd + V` / `Cmd + X` / `Cmd + A` / `Cmd + Z` / `Cmd + Shift + Z` (automatically sends `Ctrl+Shift+C/V` in terminals so physical `Ctrl+C` still sends `SIGINT`).
+- **Toggle Window Floating:** `Cmd + Shift + F` (`SUPER + SHIFT + F`) or `Cmd + Option + V` (`SUPER + ALT + V`).
+- **Mission Control & Spaces Overview:** 3-finger swipe up (or `Ctrl + Up`) to open; 3-finger swipe down (or `Ctrl + Down` / `Esc`) to close; 3-finger swipe left/right to switch workspaces.
 - **Screenshot Region to Clipboard:** `Ctrl + Cmd + Shift + 4` (`CTRL + SUPER + SHIFT + 4` / `code:13`) or `Cmd + Shift + 4` (`SUPER + SHIFT + 4`) or `Cmd + Shift + P`.
 - **Clipboard History (Maccy equivalent):** Click the clipboard icon (`󰅌`) in the top-right status bar, or press `Cmd + Shift + V` (`SUPER + SHIFT + V`) / `Cmd + Ctrl + V` (`SUPER + CTRL + V`).
 - **Disable Auto-Sleep (Theine equivalent):** Click the coffee mug icon (``) in the top-right status bar, press `Cmd + Shift + I` (`SUPER + SHIFT + I`), or run `omarchy-toggle-idle toggle`.
 - **Touchpad Scrolling:** Inverted (`natural_scroll = false`, so content goes up when fingers go up) and smoothed (`scroll_factor = 0.5`).
+- **Battery Charge Threshold:** Set to `100%` by default (`omarchnix.hardware.m2air.chargeControlEndThreshold = 100;`), adjustable live via `/sys/class/power_supply/macsmc-battery/charge_control_end_threshold`.
 
 ## Touch ID Activation (`m2air`)
 
