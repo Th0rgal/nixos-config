@@ -112,6 +112,8 @@ in
     BROWSER = "brave";
   };
 
+  programs.fastfetch.enable = true;
+
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
