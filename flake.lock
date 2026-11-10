@@ -163,14 +163,15 @@
         "omarchy-plugin-marketplace": "omarchy-plugin-marketplace",
         "omarchy-plugin-opencode-usage": "omarchy-plugin-opencode-usage",
         "orb": "orb",
-        "sops-nix": "sops-nix"
+        "sops-nix": "sops-nix",
+        "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794327817,
-        "narHash": "sha256-6QRYbycFBTB3BMA/j2+U3xMpGYhyuGxsMzWmKO/3OGg=",
+        "lastModified": 1794342086,
+        "narHash": "sha256-a4ZdlNvxaJsvYNDeuvYiDGBTcAFRCVdn7G9dtdPe83I=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "fab2fae6a22233ac077b69f8a4a3416a75de1c9d",
+        "rev": "b4d999394a1d9e03f0a365cf1a1af03635379743",
         "type": "github"
       },
       "original": {
@@ -298,6 +299,23 @@
       "original": {
         "owner": "Mic92",
         "repo": "sops-nix",
+        "type": "github"
+      }
+    },
+    "turbo-lean": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794314940,
+        "narHash": "sha256-Bhd+j5gauHXItURXUENWKe1p57zMA6P5tcvFPKHt680=",
+        "owner": "Th0rgal",
+        "repo": "turbo-lean",
+        "rev": "82a940653812ad7552ae7087f2c5a3164e56e7ff",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "turbo-lean",
+        "rev": "82a940653812ad7552ae7087f2c5a3164e56e7ff",
         "type": "github"
       }
     }

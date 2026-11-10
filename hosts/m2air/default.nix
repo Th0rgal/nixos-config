@@ -82,6 +82,7 @@
       rclone
       gh
       libsecret
+      turbo-lean
       orb-desktop
       notion-calendar
       antigravity-hub
