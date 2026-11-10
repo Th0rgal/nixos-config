@@ -42,7 +42,7 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
    fprintd-verify
    ```
 3. **Where Touch ID works automatically:**
-   - **Lock screen (`omarchy-shell` & `hyprlock`)**, **`sudo`**, and **Polkit GUI prompts (`polkit-1`)**
+   - **Lock screen (`omarchy-shell`, `SUPER + ESCAPE`)**, **`sudo`**, and **Polkit GUI prompts (`polkit-1`)**
    - **Bitwarden Desktop:** Settings → Security → *Unlock with biometrics* (uses `polkit-1` + `gnome-keyring`) and WebAuthn/FIDO2 passkeys via `aurora-fido`
    - **Orb Desktop:** Native `orb-signer` uses `fprintd-verify` for Touch ID approval & biometric authentication
 
