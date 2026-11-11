@@ -193,11 +193,11 @@
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794392033,
-        "narHash": "sha256-dbMcmTD3WuyxU2R0clEySocDlO8g0BUBkOu5uYU0aCM=",
+        "lastModified": 1794404440,
+        "narHash": "sha256-k5XWAusjAy8ihCT6szomRXiMZl3MswPAl70s/67dePk=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "659bf1857cb5f11e066562774d516fbc3147c37c",
+        "rev": "37dae8d89da58c0e57dead79efc21900e7fe99f5",
         "type": "github"
       },
       "original": {

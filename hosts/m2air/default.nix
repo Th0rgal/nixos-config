@@ -104,6 +104,7 @@ in
       airdrop.enable = true;
       quickshare.enable = true;
       nearby.enable = true;
+      kdeconnect.enable = true;
     };
     desktop = {
       enable = true;
