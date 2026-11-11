@@ -76,6 +76,27 @@
         "type": "github"
       }
     },
+    "folio": {
+      "inputs": {
+        "nixpkgs": [
+          "omarchnix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794334419,
+        "narHash": "sha256-uL0JJOhLjORwXlpmylqjp4jtXNloSe6UZ1aZcJcoAMg=",
+        "owner": "Th0rgal",
+        "repo": "folio",
+        "rev": "d06218ef45a2db7e00354b0b9f04818b96af5ba5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "folio",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -155,6 +176,7 @@
     "omarchnix": {
       "inputs": {
         "apple-silicon-support": "apple-silicon-support",
+        "folio": "folio",
         "home-manager": "home-manager",
         "nixos-aurora": "nixos-aurora",
         "nixpkgs": "nixpkgs",
@@ -171,11 +193,11 @@
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794351841,
-        "narHash": "sha256-rMDTYnmwmBa5q6KRqWRb+blntpxR3XHMAEolfRmiSFA=",
+        "lastModified": 1794392033,
+        "narHash": "sha256-dbMcmTD3WuyxU2R0clEySocDlO8g0BUBkOu5uYU0aCM=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "db8897c58e5ed02440e6704101c0b2f7434954ad",
+        "rev": "659bf1857cb5f11e066562774d516fbc3147c37c",
         "type": "github"
       },
       "original": {
@@ -330,6 +352,10 @@
           "omarchnix",
           "apple-silicon-support"
         ],
+        "folio": [
+          "omarchnix",
+          "folio"
+        ],
         "home-manager": [
           "omarchnix",
           "home-manager"
@@ -350,7 +376,8 @@
         "sops-nix": [
           "omarchnix",
           "sops-nix"
-        ]
+        ],
+        "wallpapers": "wallpapers"
       }
     },
     "sops-nix": {
@@ -388,6 +415,22 @@
         "owner": "Th0rgal",
         "repo": "turbo-lean",
         "rev": "f240450af444a302a0e02d5a5f8af00351089386",
+        "type": "github"
+      }
+    },
+    "wallpapers": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794381535,
+        "narHash": "sha256-x0d6b8Vj+8tmDleUSmS/wRGP4kMdTOC9pADvgjW4990=",
+        "owner": "Th0rgal",
+        "repo": "wallpapers",
+        "rev": "c82f156286ee93adef1224ff6a596524971d25f3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "wallpapers",
         "type": "github"
       }
     }
