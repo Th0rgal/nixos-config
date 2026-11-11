@@ -1,8 +1,13 @@
 {
-  description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, spark), built on Th0rgal/omarchnix";
+  description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, spark, vm), built on Th0rgal/omarchnix";
 
   inputs = {
     omarchnix.url = "github:Th0rgal/omarchnix";
+
+    wallpapers = {
+      url = "github:Th0rgal/wallpapers";
+      flake = false;
+    };
 
     nixpkgs.follows = "omarchnix/nixpkgs";
     apple-silicon-support.follows = "omarchnix/apple-silicon-support";
@@ -10,18 +15,13 @@
     home-manager.follows = "omarchnix/home-manager";
     sops-nix.follows = "omarchnix/sops-nix";
     orb.follows = "omarchnix/orb";
+    folio.follows = "omarchnix/folio";
   };
 
   outputs =
     {
-      self,
       nixpkgs,
       omarchnix,
-      apple-silicon-support,
-      nixos-aurora,
-      home-manager,
-      sops-nix,
-      orb,
       ...
     }@inputs:
     let
@@ -31,76 +31,66 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
-      mkHost =
-        {
-          system ? "aarch64-linux",
-          withAsahiOverlay ? true,
-          withAuroraOverlay ? false,
-          modules,
-        }:
-        nixpkgs.lib.nixosSystem {
-          inherit system;
-          specialArgs = {
-            inherit inputs;
-          };
-          modules = [
-            {
-              nixpkgs.overlays =
-                nixpkgs.lib.optionals withAuroraOverlay [
-                  nixos-aurora.inputs.apple-silicon.overlays.default
-                  nixos-aurora.overlays.default
-                ]
-                ++ nixpkgs.lib.optionals (withAsahiOverlay && !withAuroraOverlay) [
-                  apple-silicon-support.overlays.default
-                ]
-                ++ [
-                  orb.overlays.default
-                  omarchnix.overlays.default
-                ];
-              nix.registry.nixpkgs.flake = nixpkgs;
-            }
-            omarchnix.nixosModules.omarchnix
-            home-manager.nixosModules.home-manager
-            sops-nix.nixosModules.sops
-          ]
-          ++ modules;
-        };
+      mkPersonalHost =
+        args:
+        omarchnix.lib.mkHost (
+          {
+            extraSpecialArgs = { inherit inputs; };
+          }
+          // args
+        );
     in
     {
       nixosConfigurations = {
         # MacBook Air M2 daily driver with Aurora SEP, Touch ID (fprintd), FIDO2 (aurora-fido) & Orb Touch ID signer
-        m2air = mkHost {
-          withAuroraOverlay = true;
+        m2air = mkPersonalHost {
+          platform = "m2air-aurora";
           modules = [
-            nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/m2air
             ./hosts/m2air/aurora.nix
           ];
         };
 
-        # Alias for m2air with Aurora SEP & Touch ID enabled
-        m2air-aurora = mkHost {
-          withAuroraOverlay = true;
+        # Explicit alias for Stage-2 Aurora SEP & Touch ID configuration
+        m2air-aurora = mkPersonalHost {
+          platform = "m2air-aurora";
           modules = [
-            nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/m2air
             ./hosts/m2air/aurora.nix
           ];
         };
 
         # Stock nixos-apple-silicon fallback (without Stage-2 Aurora SEP)
-        m2air-stock = mkHost {
+        m2air-stock = mkPersonalHost {
+          platform = "m2air-asahi";
           modules = [
-            apple-silicon-support.nixosModules.apple-silicon-support
             ./hosts/m2air
           ];
         };
 
         # NVIDIA Grace / DGX Spark ARM64 workstation & server
-        spark = mkHost {
-          withAsahiOverlay = false;
+        spark = mkPersonalHost {
+          platform = "spark";
           modules = [
             ./hosts/spark
+          ];
+        };
+
+        # Turnkey desktop VM (`aarch64-linux` / Apple Silicon QEMU or cloud VM) with preloaded Th0rgal/wallpapers
+        vm = mkPersonalHost {
+          platform = "vm";
+          system = "aarch64-linux";
+          modules = [
+            ./hosts/vm
+          ];
+        };
+
+        # Turnkey desktop VM (`x86_64-linux` QEMU or cloud VM) with preloaded Th0rgal/wallpapers
+        vm-x86_64 = mkPersonalHost {
+          platform = "vm";
+          system = "x86_64-linux";
+          modules = [
+            ./hosts/vm
           ];
         };
       };
