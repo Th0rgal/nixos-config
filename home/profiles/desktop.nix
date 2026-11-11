@@ -30,15 +30,33 @@ in
     mkdir -p "$HOME/Notes"
   '';
 
-  # Seed `~/Pictures/Wallpapers/*.webp` from `inputs.wallpapers` on fresh VMs/workstations
-  # without overwriting existing files (preserving `~/Pictures/Wallpapers` git checkout on `m2air`).
+  # Seed `~/Pictures/Wallpapers/*.webp` from `inputs.wallpapers` on fresh VMs/workstations,
+  # refreshing `/nix/store` (or dangling) symlinks when `inputs.wallpapers` updates while
+  # preserving regular files in an existing `~/Pictures/Wallpapers` git checkout (`m2air`).
   home.activation.seedWallpapersDir = config.lib.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/Pictures/Wallpapers"
+    for existing in "$HOME/Pictures/Wallpapers"/*.webp; do
+      [ -L "$existing" ] || continue
+      case "$(readlink "$existing" || true)" in
+        /nix/store/*)
+          [ -f "${inputs.wallpapers}/$(basename "$existing")" ] || rm -f "$existing"
+          ;;
+      esac
+    done
     for wp in "${inputs.wallpapers}"/*.webp; do
       [ -f "$wp" ] || continue
       dest="$HOME/Pictures/Wallpapers/$(basename "$wp")"
-      if [ ! -e "$dest" ]; then
-        ln -s "$wp" "$dest"
+      if [ -L "$dest" ]; then
+        case "$(readlink "$dest" || true)" in
+          /nix/store/*)
+            ln -sfn "$wp" "$dest"
+            ;;
+          *)
+            [ -e "$dest" ] || ln -sfn "$wp" "$dest"
+            ;;
+        esac
+      elif [ ! -e "$dest" ]; then
+        ln -sfn "$wp" "$dest"
       fi
     done
   '';
