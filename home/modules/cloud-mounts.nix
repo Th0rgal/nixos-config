@@ -1,7 +1,5 @@
 # On-demand sparse-cached FUSE cloud mounts (`~/Cloud/Apple` & `~/Cloud/Google`)
-# backed by `rclone mount --vfs-cache-mode full`, with Flea & GTK sidebar bookmarks
-# and `tumblerd` thumbnail exclusion so opening media folders never triggers
-# unsolicited mass downloads.
+# backed by `rclone mount --vfs-cache-mode full`, with Flea & GTK sidebar bookmarks.
 {
   config,
   lib,
@@ -38,22 +36,6 @@ let
       ];
     };
   };
-
-  # Derive `~/.config/tumbler/tumbler.rc` directly from upstream `pkgs.tumbler`
-  # so every built-in thumbnailer (JPEG, RAW, Pixbuf, FFmpeg, GStreamer, PDF,
-  # ODF, EPUB, Desktop) keeps its exact upstream priority while skipping
-  # `~/Cloud` (avoiding silent full-file reads when browsing folders in Thunar).
-  tumblerExcludePath =
-    if lib.hasPrefix "${config.home.homeDirectory}/" cfg.baseDir then
-      "~/${lib.removePrefix "${config.home.homeDirectory}/" cfg.baseDir}"
-    else
-      cfg.baseDir;
-
-  tumblerRc = pkgs.runCommand "tumbler-cloud-exclude.rc" { } ''
-    ${pkgs.gawk}/bin/awk -v excl=${lib.escapeShellArg tumblerExcludePath} \
-      '$0 == "Excludes=" { print "Excludes=" excl; next } { print }' \
-      "${pkgs.tumbler}/etc/xdg/tumbler/tumbler.rc" > "$out"
-  '';
 
   mkServicePath = lib.makeBinPath [
     pkgs.coreutils
@@ -322,8 +304,6 @@ in
       pkgs.rclone
       cloudHelper
     ];
-
-    xdg.configFile."tumbler/tumbler.rc".source = tumblerRc;
 
     home.activation.ensureCloudMountDirs = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       mkdir -p ${lib.escapeShellArg mounts.apple.mountPoint} ${lib.escapeShellArg mounts.google.mountPoint}
