@@ -60,7 +60,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
     │   ├── omarchy-shell.nix  # Quickshell bar & single-pass atomic `shell.json` reconciler
     │   ├── sharing.nix        # Unified Nearby / QuickShare / LocalSend / Ombuddy sharing plugin
     │   ├── ghostty.nix        # Declarative Ghostty terminal config (`~/.config/ghostty/config`)
-    │   ├── thunar.nix         # Declarative Flea GPUI/Vulkan file manager (& legacy Thunar) + Nearby Share plugin
+    │   ├── flea.nix           # Declarative Flea GPUI/Vulkan file manager + Nearby Share plugin
     │   ├── hypridle.nix       # Idle / Stay-Awake / DPMS / auto-lock config (`~/.config/hypr/hypridle.conf`)
     │   ├── hyprlock.nix       # Lockscreen config
     │   ├── foot.nix           # Foot terminal config (`~/.config/foot/foot.ini`)
