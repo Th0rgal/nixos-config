@@ -14,6 +14,7 @@ in
 {
   imports = [
     ./core.nix
+    ../modules/cloud-mounts.nix
     inputs.folio.homeManagerModules.default
   ];
 
@@ -97,8 +98,13 @@ in
         touch "$bookmarks_file"
         for dir in "$HOME/Notes" "$HOME/work"; do
           [ -d "$dir" ] || continue
-          entry="file://$dir $(basename "$dir")"
+          label="$(basename "$dir")"
+          entry="file://$dir $label"
           grep -qxF "$entry" "$bookmarks_file" 2>/dev/null || printf '%s\n' "$entry" >> "$bookmarks_file"
+          if [ -x "${pkgs.flea}/bin/flea" ]; then
+            payload="$(${pkgs.jq}/bin/jq -nc --arg l "$label" --arg p "$dir" '{op:"add",record:{label:$l,path:$p}}')"
+            "${pkgs.flea}/bin/flea" --favourites "$payload" >/dev/null 2>&1 || true
+          fi
         done
       '';
 

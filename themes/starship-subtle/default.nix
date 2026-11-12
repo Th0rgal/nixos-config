@@ -292,6 +292,10 @@ let
         selection-alpha  = 0.35
       '';
 
+      flea = ''
+        background-alpha = ${if isLight then "0.48" else "0.45"}
+      '';
+
       controls = ''
         normal-color              = ${fg}
         normal-fill-alpha         = 0.04
