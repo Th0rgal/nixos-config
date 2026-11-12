@@ -34,7 +34,8 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 │       ├── modules/
 │       │   ├── ssh-config.nix # Typed SSH config generator from inventory/fleet.nix
 │       │   ├── agent-shims.nix # Guard shims enforcing bun & turbo-lean
-│       │   └── opencode.nix   # OpenCode v2 CLI & Orb Router provider config
+│       │   ├── opencode.nix   # OpenCode v2 CLI & Orb Router provider config
+│       │   └── cloud-mounts.nix # On-demand rclone FUSE mounts (~/Cloud/Apple & ~/Cloud/Google)
 │       ├── profiles/
 │       │   ├── core.nix       # Headless CLI, Git, SSH, OpenCode, CLI tools (shared across all hosts)
 │       │   └── desktop.nix    # Full GUI, macOS suite, Space wallpapers, MIME defaults, Ghostty
@@ -59,7 +60,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
     │   ├── omarchy-shell.nix  # Quickshell bar & single-pass atomic `shell.json` reconciler
     │   ├── sharing.nix        # Unified Nearby / QuickShare / LocalSend / Ombuddy sharing plugin
     │   ├── ghostty.nix        # Declarative Ghostty terminal config (`~/.config/ghostty/config`)
-    │   ├── thunar.nix         # Declarative Thunar preferences & bookmarks
+    │   ├── thunar.nix         # Declarative Flea GPUI/Vulkan file manager (& legacy Thunar) + Nearby Share plugin
     │   ├── hypridle.nix       # Idle / Stay-Awake / DPMS / auto-lock config (`~/.config/hypr/hypridle.conf`)
     │   ├── hyprlock.nix       # Lockscreen config
     │   ├── foot.nix           # Foot terminal config (`~/.config/foot/foot.ini`)

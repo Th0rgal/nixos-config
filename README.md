@@ -7,7 +7,7 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 | Repository | Purpose | What Lives There |
 | :--- | :--- | :--- |
 | **[`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix)** | Reusable public distribution, installer & macOS-feel suite | `lib.mkHost` host constructor, `overlays/default.nix`, `nixosModules.{omarchnix,hardware-m2air,hardware-spark}`, `homeManagerModules.omarchnix`, `home/macos.nix` (`mission-control`, `macos-dock`, `spotlight`, `touchid`, `workspace-wallpapers`, `workspaces`), `omarchy-shell`, 23+ themes, Apple Silicon Asahi/Aurora SEP modules, and CI gate tests. |
-| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,fleet,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,spark,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
+| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,fleet,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,spark,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode,cloud-mounts}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
 | **[`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers)** | Declarative WebP desktop & Space wallpapers | The 8 per-Space WebP wallpapers (`singapore.webp`, `bologna-dome.webp`, etc.) pinned in `flake.lock` so physical hosts and ephemeral VMs boot with identical Space backgrounds out of the box. |
 
 ## Hosts
