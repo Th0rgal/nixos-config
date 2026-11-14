@@ -1,10 +1,17 @@
 # Declarative OpenCode v2 CLI (`anomalyco/opencode` v2.2.7) and Orb Router provider sync.
 {
+  inventory,
   pkgs,
   ...
 }:
 let
-  opencodeLatest = pkgs.opencode-v2;
+  # OpenCode commits as the agent identity, not as Thomas.
+  opencodeLatest =
+    (import ../../lib/agent-git.nix {
+      inherit pkgs;
+      inherit (inventory.user) agent;
+    }).wrap
+      pkgs.opencode-v2;
 
   syncScript = pkgs.writeText "opencode-orbrouter-sync.py" (
     builtins.readFile ./opencode-orbrouter-sync.py
