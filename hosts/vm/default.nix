@@ -45,7 +45,7 @@ in
   home-manager.users.${user.username} = import ../../home/profiles/desktop.nix;
 
   environment.systemPackages = with pkgs; [
-    brave
+    helium
     gh
     bun
     turbo-lean

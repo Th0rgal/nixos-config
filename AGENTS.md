@@ -34,7 +34,9 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 │       ├── modules/
 │       │   ├── ssh-config.nix # Typed SSH config generator from inventory/fleet.nix
 │       │   ├── agent-shims.nix # Guard shims enforcing bun & turbo-lean
-│       │   └── opencode.nix   # OpenCode v2 CLI & Orb Router provider config
+│       │   ├── opencode.nix   # OpenCode v2 CLI & Orb Router provider config
+│       │   ├── cloud-mounts.nix # On-demand rclone FUSE mounts (~/Cloud/Apple & ~/Cloud/Google)
+│       │   └── rbw.nix        # rbw Bitwarden CLI/agent + opt-in Touch ID pinentry (`rbw-touchid enroll`)
 │       ├── profiles/
 │       │   ├── core.nix       # Headless CLI, Git, SSH, OpenCode, CLI tools (shared across all hosts)
 │       │   └── desktop.nix    # Full GUI, macOS suite, Space wallpapers, MIME defaults, Ghostty
@@ -59,7 +61,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
     │   ├── omarchy-shell.nix  # Quickshell bar & single-pass atomic `shell.json` reconciler
     │   ├── sharing.nix        # Unified Nearby / QuickShare / LocalSend / Ombuddy sharing plugin
     │   ├── ghostty.nix        # Declarative Ghostty terminal config (`~/.config/ghostty/config`)
-    │   ├── thunar.nix         # Declarative Thunar preferences & bookmarks
+    │   ├── flea.nix           # Declarative Flea GPUI/Vulkan file manager + Nearby Share plugin
     │   ├── hypridle.nix       # Idle / Stay-Awake / DPMS / auto-lock config (`~/.config/hypr/hypridle.conf`)
     │   ├── hyprlock.nix       # Lockscreen config
     │   ├── foot.nix           # Foot terminal config (`~/.config/foot/foot.ini`)
@@ -82,6 +84,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 | **Personal SSH hosts, git/user identity, Space wallpaper mapping** | [`nixos-config/inventory/fleet.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/fleet.nix), [`nixos-config/inventory/user.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/user.nix), [`nixos-config/inventory/wallpapers.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/wallpapers.nix) |
 | **Personal packages, host mounts/UUIDs, personal desktop apps or VM settings** | [`nixos-config/hosts/m2air/default.nix`](file:///home/thomas/work/nixos/nixos-config/hosts/m2air/default.nix), [`nixos-config/home/profiles/desktop.nix`](file:///home/thomas/work/nixos/nixos-config/home/profiles/desktop.nix), [`nixos-config/hosts/vm/default.nix`](file:///home/thomas/work/nixos/nixos-config/hosts/vm/default.nix) |
 | **Shared Omarchy desktop behavior, macOS-feel plugins (Dock, Mission Control, Spotlight, Touch ID HUD, Space Wallpapers), Hyprland bindings, reusable M2 Air hardware module** | [`omarchnix/home/macos.nix`](file:///home/thomas/work/nixos/omarchnix/home/macos.nix), [`omarchnix/pkgs/plugins/`](file:///home/thomas/work/nixos/omarchnix/pkgs/plugins), [`omarchnix/home/hyprland.nix`](file:///home/thomas/work/nixos/omarchnix/home/hyprland.nix), [`omarchnix/modules/hardware-m2air.nix`](file:///home/thomas/work/nixos/omarchnix/modules/hardware-m2air.nix) |
+| **Theme palettes & frosted-glass surface tokens (`shell.toml`)** | [`nixos-config/themes/starship-subtle/default.nix`](file:///home/thomas/work/nixos/nixos-config/themes/starship-subtle/default.nix) (Starship Dark/Light overrides), [`omarchnix/pkgs/omarchy-shell.nix`](file:///home/thomas/work/nixos/omarchnix/pkgs/omarchy-shell.nix) (`default/themed/shell.toml.tpl` defaults for all bundled themes) |
 
 ---
 
@@ -139,18 +142,18 @@ git add flake.lock && git commit -m "chore(flake): update inputs" && git push
 ## 4. Hardware & Desktop Reference (`m2air`)
 
 ### Keyboard Shortcuts (`Option` = `ALT` for WM & Spaces, `Cmd` = `SUPER` for Orb & Apps)
-- **Close Tab / Window / Force-Kill:** `Cmd + W` (closes active tab in browsers, editors & Ghostty, or single-window apps; ignored in Orb) / `Option + Shift + Q` (close whole window) / `Ctrl + Option + Shift + Q` (force-kill)
+- **Close Window / Force-Kill:** `Cmd + Shift + Q` or `Option + Shift + Q` (close active window) / `Ctrl + Option + Shift + Q` (force-kill)
 - **Task & Performance Manager (Mission Center):** `Ctrl + Shift + Esc` (Windows Task Manager shortcut) or `Cmd + Option + Esc` (macOS Force Quit shortcut) — summons/toggles centered floating Mission Center on the active Space
 - **Copy / Paste / Cut / Select All / Undo / Redo / Find:** `Cmd + C` / `Cmd + V` / `Cmd + X` / `Cmd + A` / `Cmd + Z` / `Cmd + Shift + Z` / `Cmd + F` (automatically translates to `Ctrl+Shift+C/V/F` in terminals so physical `Ctrl+C` still sends `SIGINT` and `Cmd+F` opens terminal search)
 - **Clipboard History (Maccy equivalent):** `Cmd + Shift + V` or `Cmd + Ctrl + V`, or click the **`󰅌`** icon in the top-right status bar
-- **Region Screenshot to Clipboard:** `Ctrl + Cmd + Shift + 4`, `Cmd + Shift + 4`, or `Option + Shift + 4` (`Option/Cmd + Shift + P`); capture & screen-recording menu on `Ctrl + Cmd + Shift + 5`, `Cmd + Shift + 5`, or `Option + Shift + 5`
+- **Region Screenshot & Screen Recording:** `Ctrl + Shift + Cmd + 4` (region screenshot to clipboard); `Ctrl + Shift + Cmd + 5` (capture & screen-recording menu / stop recording)
 - **Mission Control & Spaces Overview:** **`Option + Esc`** or **3-finger swipe up** to open; **`Esc` / `Option + Esc`** or **3-finger swipe down** to close; **3-finger swipe left/right**, **`Option + 1..0`**, or **`Option + Tab`** (previous Space) to switch workspaces (`Option + Shift + 1..0` to move & follow, `Option + Ctrl + 1..0` to move silently)
 - **Stay Awake / Theine Toggle:** Click the coffee cup icon in the top-right status bar or press `Option + Shift + I` / `Cmd + Shift + I`
 - **Window Focus / Move (Tiling WM):** `Option + H/J/K/L` (or `Option + Arrows`) to focus; `Option + Shift + H/J/K/L` (or `Option + Shift + Arrows`) to move; `Option + Left/Right-Drag` to move/resize with trackpad
 - **Toggle Window Floating / Centered Showcase / Split / Pseudo:** `Option + Shift + F` or `Option + V` (float), `Option + C` (centered floating showcase w/ wallpaper margins — press again to re-tile), `Option + E` (split), `Option + P` (pseudo)
 - **Fullscreen / Maximize:** `Option + F` (fullscreen) / `Option + M` (maximize)
 - **Scratchpad:** `Option + S` or `` Option + ` `` (`Shift` moves window to scratchpad)
-- **Spotlight / Orb / Terminal / Theme / Reload / Lock:** `Option + Space` (`Option + Shift + Space` expanded App Grid) / `Option + O` / `Option + Return` / `Option + Shift + T` (dark/light toggle; `Option + Ctrl + T` picker) / `Option + Shift + R` (reload Hyprland) / **Power / Touch ID button**, `Ctrl + Cmd + Q`, or `Cmd + Escape`
+- **Spotlight / Orb / Terminal / Browser / Files / Theme / Reload / Lock:** `Option + Space` (`Option + Shift + Space` expanded App Grid) / `Option + O` / `Option + Return` / `Option + B` (Helium) / `Option + W` (Flea file manager) / `Option + Shift + T` (dark/light toggle; `Option + Ctrl + T` picker) / `Option + Shift + R` (reload Hyprland) / **Power / Touch ID button**, `Ctrl + Cmd + Q`, or `Cmd + Escape`
 - **Keyboard Backlight:** `Option + F1/F2`, `Ctrl + F1/F2`, or `Cmd + F1/F2` (`Option/Ctrl/Cmd + BrightnessDown/Up`), or open the **`󰍹`** Display & Brightness tray panel (**KEYBOARD BACKLIGHT** slider; right-click toggles `0%` $\leftrightarrow$ last level)
 
 ### Keyboard Backlight (`kbd_backlight`)
@@ -168,3 +171,21 @@ git add flake.lock && git commit -m "chore(flake): update inputs" && git push
   echo 80 > /sys/class/power_supply/macsmc-battery/charge_control_end_threshold
   echo 100 > /sys/class/power_supply/macsmc-battery/charge_control_end_threshold
   ```
+
+---
+
+## 5. Omarchy Shell Glass, Blur & Theme Architecture
+
+All desktop chrome shares a unified **Balanced Readable Glass** design powered natively by Hyprland's compositor Kawase blur (`passes = 3`, `size = 10`, `new_optimizations = true`, `xray = false`) and Omarchy's live `Commons.Color` (`shell.toml`) token layer — never QML offscreen blur shaders (`MultiEffect` / `FastBlur`).
+
+### Two-Tier Frosted Translucency
+- **Ambient Chrome (`alpha = 0.35`):** Top Status Bar (`bar.background = "glassy"` in `shell.json`), macOS Dock ([`DockWindow.qml`](file:///home/thomas/work/nixos/omarchnix/pkgs/plugins/macos-dock/DockWindow.qml)), and Spotlight ([`Spotlight.qml`](file:///home/thomas/work/nixos/omarchnix/pkgs/plugins/spotlight/Spotlight.qml)) clamp `Commons.Color.bar.background` to `0.35` alpha with a 1px `0.08` hairline border.
+- **Balanced Readable Cards (`alpha = 0.45–0.48`, tooltips `0.58`):** Builtin Omarchy plugins — Clipboard (`omarchy.clipboard`), Menu (`omarchy.menu`), Emojis (`omarchy.emojis`), status-bar panels (`[popups]`), Notifications (`[notifications]`), Polkit (`[polkit]`), Lock input (`[lock]`), and Touch ID HUD ([`TouchId.qml`](file:///home/thomas/work/nixos/omarchnix/pkgs/plugins/touchid/TouchId.qml)) — use ~`0.45` (dark) / `0.48` (light) surface opacity so dense multi-line text stays crisp over high-contrast windows while preserving vibrant frosted blur across Dark & Light theme switches.
+  - Defaults for all 20+ bundled themes live in `default/themed/shell.toml.tpl` (patched in [`omarchnix/pkgs/omarchy-shell.nix`](file:///home/thomas/work/nixos/omarchnix/pkgs/omarchy-shell.nix)); `starship-subtle` Dark/Light overrides live in [`nixos-config/themes/starship-subtle/default.nix`](file:///home/thomas/work/nixos/nixos-config/themes/starship-subtle/default.nix).
+
+### Compositor & Qt Quick Invariants (Do Not Break)
+1. **Keep fullscreen overlay backdrops below `ignore_alpha` (`scrim-alpha = 0.0 < ignore_alpha = 0.05`):**
+   - `omarchy-glass`, `omarchnix-spotlight`, `omarchnix-touchid`, and `decoration.blur.popups_ignorealpha` use **`ignore_alpha = 0.05`** ([`hyprland.nix`](file:///home/thomas/work/nixos/omarchnix/home/hyprland.nix), [`macos.nix`](file:///home/thomas/work/nixos/omarchnix/home/macos.nix)).
+   - Fullscreen `OverlayWindow` plugins (`Clipboard`, `Menu`, `Emojis`, `Polkit`) paint a fullscreen `scrim` `Rectangle` behind their centered card. Keeping `scrim-alpha = 0.0` ensures Hyprland skips blurring the surrounding screen (leaving the desktop sharp like Spotlight and avoiding fullscreen 3-pass blur fill-rate on Retina displays). Card-local modals ([`ConfirmDialog.qml`](file:///home/thomas/work/nixos/omarchnix/pkgs/omarchy-shell.nix)) dim only their parent card (`0.62` alpha) when `scrim-alpha == 0`.
+2. **Keep card `border-alpha >= ignore_alpha`:**
+   - Qt Quick's `Rectangle.border` (`BorderSurface`) replaces outer pixel alpha directly instead of compositing over `color`. Any blurred card border must have `border-alpha >= 0.05` (e.g., `0.08` specular hairline on Dock/Spotlight, or ~`18%` `foreground`-into-`background` pre-mixed neutral border at `border-alpha = 0.55–0.65` in `shell.toml`) so the 1px outer ring stays inside Hyprland's blur mask without bright-window halo bleed.

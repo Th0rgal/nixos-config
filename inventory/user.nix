@@ -7,6 +7,7 @@
   hindsight = {
     apiUrl = "https://memory.thomas.md";
     bank = "thomas";
+    syncBank = "folio";
     notesDir = "/home/thomas/Notes";
   };
 
@@ -37,14 +38,14 @@
     palomaMacbookAir = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJc0SQKxLSh5OBhIrOp7+YpmSnGVvkO7l/hOaC5Klinx paloma-macbook-air@10.88.0.100";
     sparkDebug = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOaAvcqsYHGjxyUIb8odmePvJT26SjXl05seGZVAauhQ spark-admin@m2air-debug";
 
+    touchId = "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBKa4QlcgVdUgxHDSkpYhA41R6yZuHN5eXu6A6rkTFcOqtc1iinJeJbFMCfU2k+hBMTEX93dPj/uIXEtlWeR15JsAAAAEc3NoOg== thomas-touchid@m2air";
+
     admin = [
+      touchId
       yubikeyAdmin
       breakglass
     ];
 
-    m2airAuthorized = admin ++ [
-      palomaMacbookAir
-      sparkDebug
-    ];
+    m2airAuthorized = admin;
   };
 }

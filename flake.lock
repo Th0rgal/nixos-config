@@ -118,6 +118,26 @@
         "type": "github"
       }
     },
+    "nix-index-database": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794132860,
+        "narHash": "sha256-iGNtQnUZsi+v6/4NbtYr+dsmASa6GkzXtUcTpE8F3mE=",
+        "owner": "nix-community",
+        "repo": "nix-index-database",
+        "rev": "af9249ca33bc2efaae5d071e4c67ddef19dcb681",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nix-index-database",
+        "type": "github"
+      }
+    },
     "nixos-aurora": {
       "inputs": {
         "apple-silicon": "apple-silicon",
@@ -193,11 +213,11 @@
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794428254,
-        "narHash": "sha256-hnt0pwOGFjUt3jo2zyMyVOCZXpJdsgdaLP67Z3f21z8=",
+        "lastModified": 1794480120,
+        "narHash": "sha256-EVWecXS+n6uqTu4VdoAmGPC6FKyWd5ai+DGufYWKAs4=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "1ea4bb83bb6e5218177950473e0f70340885f200",
+        "rev": "8f70552f25d29b7d2ac5666b6d20b5dc536e8a4d",
         "type": "github"
       },
       "original": {
@@ -360,6 +380,7 @@
           "omarchnix",
           "home-manager"
         ],
+        "nix-index-database": "nix-index-database",
         "nixos-aurora": [
           "omarchnix",
           "nixos-aurora"

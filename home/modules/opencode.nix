@@ -53,11 +53,6 @@ in
 {
   home.packages = [ opencodeLatest ];
 
-  # Keep `~/.config/opencode/opencode.json` as a regular writable file (managed by
-  # `home.activation.opencodeOrbRouterConfig` below) instead of a `/nix/store` symlink,
-  # so `orbrouter.thomas.md` models + `OrbLocald` MCP entries coexist cleanly.
-  xdg.configFile."opencode/opencode.json".enable = lib.mkForce false;
-
   home.activation.opencodeOrbRouterConfig =
     config.lib.dag.entryAfter [ "writeBoundary" "linkGeneration" ]
       ''

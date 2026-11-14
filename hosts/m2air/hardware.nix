@@ -43,4 +43,15 @@
       "dmask=0077"
     ];
   };
+
+  # Secondary 16 GiB swapfile inside LUKS `/dev/mapper/cryptroot` (`priority = 0`)
+  # behind fast in-RAM `zstd` `zramSwap` (`priority = 100`), preventing hard
+  # `Free swap = 0kB` kernel OOM kills during parallel Lean / Rust / Nix VM builds.
+  swapDevices = [
+    {
+      device = "/var/lib/swapfile";
+      size = 16 * 1024;
+      priority = 0;
+    }
+  ];
 }

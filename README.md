@@ -7,7 +7,7 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 | Repository | Purpose | What Lives There |
 | :--- | :--- | :--- |
 | **[`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix)** | Reusable public distribution, installer & macOS-feel suite | `lib.mkHost` host constructor, `overlays/default.nix`, `nixosModules.{omarchnix,hardware-m2air,hardware-spark}`, `homeManagerModules.omarchnix`, `home/macos.nix` (`mission-control`, `macos-dock`, `spotlight`, `touchid`, `workspace-wallpapers`, `workspaces`), `omarchy-shell`, 23+ themes, Apple Silicon Asahi/Aurora SEP modules, and CI gate tests. |
-| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,fleet,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,spark,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
+| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,fleet,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,spark,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode,cloud-mounts}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
 | **[`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers)** | Declarative WebP desktop & Space wallpapers | The 8 per-Space WebP wallpapers (`singapore.webp`, `bologna-dome.webp`, etc.) pinned in `flake.lock` so physical hosts and ephemeral VMs boot with identical Space backgrounds out of the box. |
 
 ## Hosts
@@ -19,12 +19,12 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 
 ## macOS-Style Shortcuts & Ergonomics (`Option` = `ALT` for WM & Spaces, `Cmd` = `SUPER` for Orb & Apps)
 
-- **Close Tab / Window / Force-Kill:** `Cmd + W` (closes active tab in browsers, editors & Ghostty, or single-window apps; ignored in Orb) / `Option + Shift + Q` (`ALT + SHIFT + Q`, close whole window) / `Ctrl + Option + Shift + Q` (`CTRL + ALT + SHIFT + Q`, force-kill).
+- **Close Window / Force-Kill:** `Cmd + Shift + Q` (`SUPER + SHIFT + Q`) or `Option + Shift + Q` (`ALT + SHIFT + Q`) to close the active window / `Ctrl + Option + Shift + Q` (`CTRL + ALT + SHIFT + Q`, force-kill).
 - **Task & Performance Manager (Mission Center):** `Ctrl + Shift + Esc` or `Cmd + Option + Esc` — summons/toggles centered floating Mission Center on the active Space.
 - **Universal Copy / Paste / Cut / Select All / Undo / Redo / Find:** `Cmd + C` / `Cmd + V` / `Cmd + X` / `Cmd + A` / `Cmd + Z` / `Cmd + Shift + Z` / `Cmd + F` (automatically translates to `Ctrl+Shift+C/V/F` in terminals so physical `Ctrl+C` still sends `SIGINT` and `Cmd+F` opens terminal search).
 - **Window Management (`Option` = `ALT`, AeroSpace style):** Focus with `Option + H/J/K/L` (or `Option + Arrows`), move with `Option + Shift + H/J/K/L` (or `Option + Shift + Arrows`), fullscreen with `Option + F`, maximize with `Option + M`, toggle float with `Option + Shift + F` or `Option + V`, centered floating showcase with `Option + C`, scratchpad with `Option + S` or `` Option + ` `` — keeping `Cmd + <key>` 100% free for Orb & apps.
 - **Mission Control & Spaces Overview:** `Option + Esc` or 3-finger swipe up to open; `Esc` / `Option + Esc` or 3-finger swipe down to close; 3-finger swipe left/right, `Option + 1..0`, or `Option + Tab` (previous Space) to switch workspaces (`Option + Shift + 1..0` / `Option + Ctrl + 1..0` to move windows).
-- **Screenshot Region to Clipboard:** `Ctrl + Cmd + Shift + 4`, `Cmd + Shift + 4` (`SUPER + SHIFT + code:13`), `Option + Shift + 4` (`ALT + SHIFT + code:13`), or `Option/Cmd + Shift + P`; capture & screen-recording menu on `Ctrl + Cmd + Shift + 5`, `Cmd + Shift + 5`, or `Option + Shift + 5`.
+- **Screenshot & Screen Recording:** `Ctrl + Shift + Cmd + 4` (`CTRL + SUPER + SHIFT + code:13`) for region screenshot to clipboard; `Ctrl + Shift + Cmd + 5` (`CTRL + SUPER + SHIFT + code:14`) for capture & screen-recording menu / stop recording.
 - **Clipboard History (Maccy equivalent):** Click the clipboard icon (`󰅌`) in the top-right status bar, or press `Cmd + Shift + V` (`SUPER + SHIFT + V`) / `Cmd + Ctrl + V` (`SUPER + CTRL + V`).
 - **Disable Auto-Sleep (Theine equivalent):** Click the coffee mug icon (``) in the top-right status bar, press `Option + Shift + I` / `Cmd + Shift + I`, or run `omarchy-toggle-idle toggle`.
 - **Touchpad Scrolling:** Inverted (`natural_scroll = false`, so content goes up when fingers go up) and smoothed (`scroll_factor = 0.5`).
