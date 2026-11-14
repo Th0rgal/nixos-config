@@ -2,30 +2,25 @@
 # with the full Omarchnix macOS desktop suite and `Th0rgal/wallpapers` preloaded.
 {
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
+  inherit (inventory) user;
 in
 {
   imports = [
-    ../common/thomas-user.nix
+    ../common/desktop.nix
   ];
 
   networking.hostName = "omarchnix-vm";
 
   omarchnix = {
-    enable = true;
-    profile = "vm";
-    defaultTimeZone = user.defaultTimeZone;
-    hardening.enable = true;
+    # Live systemd job tree on the boot console (also answers the LUKS prompt).
+    # Roll back from the GRUB menu, or set this to false, if the console misbehaves.
+    boot.bootvine.enable = true;
     containers.enable = false;
-    secrets.enable = false;
     desktop = {
-      enable = true;
-      user = user.username;
-      theme = "starship-subtle";
-      shellBackend = "omarchy-shell";
       keyboard = {
         layout = "us";
         variant = "intl";
@@ -42,10 +37,15 @@ in
     };
   };
 
-  home-manager.users.${user.username} = import ../../home/profiles/desktop.nix;
+  # First-install release of this user's home state; never bump it to "upgrade".
+  home-manager.users.${user.username}.home.stateVersion = "25.05";
+
+  # First-install release of this host's state. Never bump it to "upgrade"; it only
+  # changes when the machine is reinstalled.
+  system.stateVersion = "25.05";
 
   environment.systemPackages = with pkgs; [
-    brave
+    helium
     gh
     bun
     turbo-lean

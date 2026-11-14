@@ -3,18 +3,20 @@
   config,
   inputs,
   lib,
+  options,
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
-  wallpapers = import ../../inventory/wallpapers.nix inputs.wallpapers;
+  inherit (inventory) user;
+  inherit (inventory) wallpapers;
   starshipSubtle = import ../../themes/starship-subtle { inherit pkgs lib; };
 in
 {
   imports = [
     ./core.nix
-    ../modules/cloud-mounts.nix
+    ../modules/backup.nix
     inputs.folio.homeManagerModules.default
   ];
 
@@ -24,6 +26,9 @@ in
     hindsight = {
       apiUrl = user.hindsight.apiUrl;
       defaultBank = user.hindsight.bank;
+    }
+    // lib.optionalAttrs (options.programs.folio.hindsight ? syncBank) {
+      syncBank = user.hindsight.syncBank;
     };
   };
 
@@ -63,6 +68,29 @@ in
   '';
 
   programs.omarchnix = {
+    cloudMounts.enable = true;
+    rbw.enable = true;
+
+    agents = {
+      # Skills are managed centrally via `th0rgal/orb-library` (`.orb-lib.lock`),
+      # and `~/.config/opencode/opencode.json` is reconciled by `home/modules/opencode.nix`.
+      installSkills = false;
+      manageOpencodeConfig = false;
+      targets = [
+        "opencode"
+        "claude"
+        "codex"
+      ];
+      orbSync = {
+        enable = true;
+        orbOnly = true;
+        minimalHud = true;
+        launchInOrb = false;
+        manageAccountsInPanel = false;
+        pollInterval = "5m";
+      };
+    };
+
     theme = {
       name = starshipSubtle.dark.name;
       darkName = starshipSubtle.dark.name;
@@ -86,8 +114,9 @@ in
   };
 
   home.sessionVariables = {
-    BROWSER = "brave";
+    BROWSER = "helium";
     QT_QPA_PLATFORMTHEME = "xdgdesktopportal";
+    FOLIO_SYNC_BANK = lib.mkDefault user.hindsight.syncBank;
   };
 
   home.activation.personalGtkBookmarks =
@@ -111,13 +140,23 @@ in
   xdg.mimeApps = {
     enable = true;
     defaultApplications = {
+      "text/html" = [ "helium.desktop" ];
+      "x-scheme-handler/http" = [ "helium.desktop" ];
+      "x-scheme-handler/https" = [ "helium.desktop" ];
+      "x-scheme-handler/about" = [ "helium.desktop" ];
+      "x-scheme-handler/unknown" = [ "helium.desktop" ];
+      "application/xhtml+xml" = [ "helium.desktop" ];
+      "x-scheme-handler/antigravity" = [ "antigravity-hub.desktop" ];
       "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
+      "x-scheme-handler/claude" = [ "com.anthropic.Claude.desktop" ];
       "x-scheme-handler/discord" = [ "vesktop.desktop" ];
       "x-scheme-handler/sgnl" = [ "signal.desktop" ];
       "x-scheme-handler/signalcaptcha" = [ "signal.desktop" ];
       "x-scheme-handler/tg" = [ "org.telegram.desktop.desktop" ];
       "x-scheme-handler/tonsite" = [ "org.telegram.desktop.desktop" ];
       "x-scheme-handler/ton" = [ "org.telegram.desktop.desktop" ];
+      "application/vnd.anthropic.mcpb" = [ "com.anthropic.Claude.desktop" ];
+      "application/vnd.anthropic.skill" = [ "com.anthropic.Claude.desktop" ];
     };
   };
 
@@ -139,6 +178,22 @@ in
       Categories=Network;InstantMessaging;Chat;
       MimeType=x-scheme-handler/discord;
     '';
+    # Slack as a Helium web app: no official Linux arm64 desktop build exists, and
+    # `--app` shares the running browser instead of a second Electron runtime.
+    "applications/slack.desktop".text = ''
+      [Desktop Entry]
+      Version=1.5
+      Type=Application
+      Name=Slack
+      GenericName=Internet Messenger
+      Comment=Slack web app in Helium
+      Keywords=slack;chat;work;huddle;
+      Exec=helium --app=https://app.slack.com/client
+      Icon=slack
+      Terminal=false
+      StartupWMClass=helium-app.slack.com__client-Default
+      Categories=Network;InstantMessaging;Chat;
+    '';
   };
 
   # Prevent Bitwarden Desktop from silently autostarting a ~190 MiB background Electron
@@ -151,31 +206,20 @@ in
     Hidden=true
   '';
 
-  home.activation.antigravityFontDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-    if [ -d "$HOME/.config/Antigravity IDE" ]; then
-      ag_settings_dir="$HOME/.config/Antigravity IDE/User"
-      ag_settings="$ag_settings_dir/settings.json"
-      mkdir -p "$ag_settings_dir"
-      if [ ! -f "$ag_settings" ] || [ -L "$ag_settings" ]; then
-        rm -f "$ag_settings"
-        printf '{}\n' > "$ag_settings"
-      fi
-      tmp_ag="$(mktemp "$ag_settings.XXXXXX")"
-      if ${pkgs.jq}/bin/jq \
-        --arg monoFont ${lib.escapeShellArg "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace"} '
-        .["editor.fontFamily"] = (.["editor.fontFamily"] // $monoFont)
-        | .["editor.fontLigatures"] = (if has("editor.fontLigatures") then .["editor.fontLigatures"] else true end)
-        | .["terminal.integrated.fontFamily"] = (.["terminal.integrated.fontFamily"] // $monoFont)
-        | .["window.autoDetectColorScheme"] = (if has("window.autoDetectColorScheme") then .["window.autoDetectColorScheme"] else true end)
-        | .["window.controlsStyle"] = (.["window.controlsStyle"] // "hidden")
-      ' "$ag_settings" > "$tmp_ag" 2>/dev/null; then
-        mv "$tmp_ag" "$ag_settings"
-        chmod 0644 "$ag_settings"
-      else
-        rm -f "$tmp_ag"
-      fi
-    fi
+  # Antigravity IDE editor defaults; user changes in its settings UI always win.
+  programs.omarchnix.mutableJson.".config/Antigravity IDE/User/settings.json" = {
+    onlyIfExists = ".config/Antigravity IDE";
+    defaults = {
+      "editor.fontFamily" = "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace";
+      "editor.fontLigatures" = true;
+      "terminal.integrated.fontFamily" = "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace";
+      "window.autoDetectColorScheme" = true;
+      "window.controlsStyle" = "hidden";
+    };
+  };
 
+  # Antigravity Hub: inherit the system light/dark mode unless the user picked one.
+  home.activation.antigravityHubThemeMode = config.lib.dag.entryAfter [ "writeBoundary" ] ''
     ag_hub_cfg="$HOME/.gemini/config/config.json"
     if [ -f "$ag_hub_cfg" ] && [ ! -L "$ag_hub_cfg" ]; then
       cur_ag_mode="$(${pkgs.jq}/bin/jq -r '.userSettings.themeMode // ""' "$ag_hub_cfg" 2>/dev/null || true)"
@@ -203,6 +247,12 @@ in
         _args = [
           "FOLIO_DEFAULT_NOTES_DIR"
           user.hindsight.notesDir
+        ];
+      }
+      {
+        _args = [
+          "FOLIO_SYNC_BANK"
+          user.hindsight.syncBank
         ];
       }
       {

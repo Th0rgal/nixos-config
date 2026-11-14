@@ -46,6 +46,23 @@
         "type": "github"
       }
     },
+    "bootvine": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794652164,
+        "narHash": "sha256-47+MgKwFUErTiop+xab4F4AY0HqOZHCZy/OSoUo5Eqs=",
+        "ref": "refs/tags/v0.1.4",
+        "rev": "bc0674ef7820d680a62bac04259bd140de3c3f27",
+        "revCount": 119,
+        "type": "git",
+        "url": "https://codeberg.org/wvhulle/bootvine"
+      },
+      "original": {
+        "ref": "refs/tags/v0.1.4",
+        "type": "git",
+        "url": "https://codeberg.org/wvhulle/bootvine"
+      }
+    },
     "flake-compat": {
       "locked": {
         "lastModified": 1761640442,
@@ -118,6 +135,42 @@
         "type": "github"
       }
     },
+    "inventory": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794666854,
+        "narHash": "sha256-BQGUPPbvt0+njsdPs5V5AwaYWUNnrL9gl6pZ1MjOvzU=",
+        "ref": "refs/heads/main",
+        "rev": "cba2b94d88a46e221b52e005aea4543180d97160",
+        "revCount": 1,
+        "type": "git",
+        "url": "ssh://git@github.com/Th0rgal/nixos-inventory.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/Th0rgal/nixos-inventory.git"
+      }
+    },
+    "nix-index-database": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794132860,
+        "narHash": "sha256-iGNtQnUZsi+v6/4NbtYr+dsmASa6GkzXtUcTpE8F3mE=",
+        "owner": "nix-community",
+        "repo": "nix-index-database",
+        "rev": "af9249ca33bc2efaae5d071e4c67ddef19dcb681",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nix-index-database",
+        "type": "github"
+      }
+    },
     "nixos-aurora": {
       "inputs": {
         "apple-silicon": "apple-silicon",
@@ -176,6 +229,7 @@
     "omarchnix": {
       "inputs": {
         "apple-silicon-support": "apple-silicon-support",
+        "bootvine": "bootvine",
         "folio": "folio",
         "home-manager": "home-manager",
         "nixos-aurora": "nixos-aurora",
@@ -189,15 +243,16 @@
         "omdrop-awdl": "omdrop-awdl",
         "omdrop-plugin": "omdrop-plugin",
         "orb": "orb",
+        "orb-mesh": "orb-mesh",
         "sops-nix": "sops-nix",
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794480120,
-        "narHash": "sha256-EVWecXS+n6uqTu4VdoAmGPC6FKyWd5ai+DGufYWKAs4=",
+        "lastModified": 1794670224,
+        "narHash": "sha256-PMscc7yPpukUlT1NOdhT5ouFOAYDpqqDErb5IVch90E=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "8f70552f25d29b7d2ac5666b6d20b5dc536e8a4d",
+        "rev": "1b60e6a3be74148ab56d32480d318300485b57fa",
         "type": "github"
       },
       "original": {
@@ -333,16 +388,33 @@
         ]
       },
       "locked": {
-        "lastModified": 1794346358,
-        "narHash": "sha256-3Hwxo6igunjNCeEENe5tqdwDPkiV2hgvbNhuINf6Tjg=",
+        "lastModified": 1794663234,
+        "narHash": "sha256-bhV9iPxKMlghwxfT0O8QL1laSIV3URvzD9QlrTa/AAQ=",
         "owner": "Th0rgal",
         "repo": "orb",
-        "rev": "15c0c313bc4cb0b551cb277723658f6ca6128549",
+        "rev": "4514109957920ef6e493a9d872e31acf97e9eb37",
         "type": "github"
       },
       "original": {
         "owner": "Th0rgal",
         "repo": "orb",
+        "type": "github"
+      }
+    },
+    "orb-mesh": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794484513,
+        "narHash": "sha256-ONqH4L2um3W0ea65AR/iAPXVUcfuLqGzi3y3uvAFUC8=",
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "07032deb643dd0c167effb8987a397e02ff07df9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "07032deb643dd0c167effb8987a397e02ff07df9",
         "type": "github"
       }
     },
@@ -360,6 +432,8 @@
           "omarchnix",
           "home-manager"
         ],
+        "inventory": "inventory",
+        "nix-index-database": "nix-index-database",
         "nixos-aurora": [
           "omarchnix",
           "nixos-aurora"

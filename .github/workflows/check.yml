@@ -1,0 +1,48 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    # Evaluation is architecture-independent: every host must evaluate from the
+    # pinned flake.lock before anything is merged.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: Evaluate all hosts
+        # The private inventory input is replaced by the same-shaped public stub.
+        run: |
+          for host in m2air m2air-stock spark vm vm-x86_64; do
+            echo "::group::$host"
+            nix eval --raw --no-write-lock-file \
+              --override-input inventory path:./ci/inventory-stub \
+              ".#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
+            echo
+            echo "::endgroup::"
+          done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Formatting
+        run: |
+          nix fmt
+          git diff --exit-code
+      - name: statix and deadnix
+        run: nix run .#lint

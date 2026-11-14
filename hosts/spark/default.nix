@@ -1,27 +1,18 @@
 # NVIDIA Grace / DGX Spark — Thomas's ARM64 workstation & server configuration.
-{ ... }:
+{ inventory, ... }:
 let
-  user = import ../../inventory/user.nix;
+  inherit (inventory) user;
 in
 {
   imports = [
-    ../common/thomas-user.nix
+    ../common/desktop.nix
   ];
 
   networking.hostName = "spark";
 
   omarchnix = {
-    enable = true;
-    profile = "spark";
-    defaultTimeZone = user.defaultTimeZone;
-    hardening.enable = true;
     containers.enable = true;
-    secrets.enable = false;
     desktop = {
-      enable = true;
-      user = user.username;
-      theme = "starship-subtle";
-      shellBackend = "omarchy-shell";
       macos = {
         enable = true;
         gestures = false;
@@ -30,7 +21,12 @@ in
     };
   };
 
-  home-manager.users.${user.username} = import ../../home/profiles/desktop.nix;
+  # First-install release of this user's home state; never bump it to "upgrade".
+  home-manager.users.${user.username}.home.stateVersion = "25.05";
+
+  # First-install release of this host's state. Never bump it to "upgrade"; it only
+  # changes when the machine is reinstalled.
+  system.stateVersion = "25.05";
 
   fileSystems."/" = {
     device = "/dev/disk/by-label/omarchnix-root";
