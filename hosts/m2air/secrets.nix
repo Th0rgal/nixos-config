@@ -15,7 +15,7 @@
   ...
 }:
 let
-  user = inventory.user;
+  inherit (inventory) user;
   file = ../../secrets/m2air.yaml;
   present = builtins.pathExists file;
   content = if present then builtins.readFile file else "";

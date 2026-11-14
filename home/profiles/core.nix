@@ -7,7 +7,7 @@
   ...
 }:
 let
-  user = inventory.user;
+  inherit (inventory) user;
 in
 {
   imports = [
@@ -42,7 +42,7 @@ in
     settings = {
       user = {
         name = user.fullName;
-        email = user.email;
+        inherit (user) email;
       };
       init.defaultBranch = "main";
       pull.rebase = false;

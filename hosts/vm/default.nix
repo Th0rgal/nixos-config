@@ -6,27 +6,18 @@
   ...
 }:
 let
-  user = inventory.user;
+  inherit (inventory) user;
 in
 {
   imports = [
-    ../common/thomas-user.nix
+    ../common/desktop.nix
   ];
 
   networking.hostName = "omarchnix-vm";
 
   omarchnix = {
-    enable = true;
-    profile = "vm";
-    defaultTimeZone = user.defaultTimeZone;
-    hardening.enable = true;
     containers.enable = false;
-    secrets.enable = false;
     desktop = {
-      enable = true;
-      user = user.username;
-      theme = "starship-subtle";
-      shellBackend = "omarchy-shell";
       keyboard = {
         layout = "us";
         variant = "intl";
@@ -43,11 +34,8 @@ in
     };
   };
 
-  home-manager.users.${user.username} = {
-    imports = [ ../../home/profiles/desktop.nix ];
-    # First-install release of this user's home state; never bump it to "upgrade".
-    home.stateVersion = "25.05";
-  };
+  # First-install release of this user's home state; never bump it to "upgrade".
+  home-manager.users.${user.username}.home.stateVersion = "25.05";
 
   # First-install release of this host's state. Never bump it to "upgrade"; it only
   # changes when the machine is reinstalled.

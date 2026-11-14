@@ -6,7 +6,7 @@
   ...
 }:
 let
-  user = inventory.user;
+  inherit (inventory) user;
   workDir = "/home/${user.username}/work/nixos";
 
   # Single explicit entry point for rebuilding this machine. Stock `nixos-rebuild`

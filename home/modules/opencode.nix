@@ -1,6 +1,5 @@
 # Declarative OpenCode v2 CLI (`anomalyco/opencode` v2.2.7) and Orb Router provider sync.
 {
-  lib,
   pkgs,
   ...
 }:

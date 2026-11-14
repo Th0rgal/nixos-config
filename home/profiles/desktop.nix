@@ -9,7 +9,7 @@
   ...
 }:
 let
-  user = inventory.user;
+  inherit (inventory) user;
   inherit (inventory) wallpapers;
   starshipSubtle = import ../../themes/starship-subtle { inherit pkgs lib; };
 in
@@ -206,31 +206,20 @@ in
     Hidden=true
   '';
 
-  home.activation.antigravityFontDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-    if [ -d "$HOME/.config/Antigravity IDE" ]; then
-      ag_settings_dir="$HOME/.config/Antigravity IDE/User"
-      ag_settings="$ag_settings_dir/settings.json"
-      mkdir -p "$ag_settings_dir"
-      if [ ! -f "$ag_settings" ] || [ -L "$ag_settings" ]; then
-        rm -f "$ag_settings"
-        printf '{}\n' > "$ag_settings"
-      fi
-      tmp_ag="$(mktemp "$ag_settings.XXXXXX")"
-      if ${pkgs.jq}/bin/jq \
-        --arg monoFont ${lib.escapeShellArg "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace"} '
-        .["editor.fontFamily"] = (.["editor.fontFamily"] // $monoFont)
-        | .["editor.fontLigatures"] = (if has("editor.fontLigatures") then .["editor.fontLigatures"] else true end)
-        | .["terminal.integrated.fontFamily"] = (.["terminal.integrated.fontFamily"] // $monoFont)
-        | .["window.autoDetectColorScheme"] = (if has("window.autoDetectColorScheme") then .["window.autoDetectColorScheme"] else true end)
-        | .["window.controlsStyle"] = (.["window.controlsStyle"] // "hidden")
-      ' "$ag_settings" > "$tmp_ag" 2>/dev/null; then
-        mv "$tmp_ag" "$ag_settings"
-        chmod 0644 "$ag_settings"
-      else
-        rm -f "$tmp_ag"
-      fi
-    fi
+  # Antigravity IDE editor defaults; user changes in its settings UI always win.
+  programs.omarchnix.mutableJson.".config/Antigravity IDE/User/settings.json" = {
+    onlyIfExists = ".config/Antigravity IDE";
+    defaults = {
+      "editor.fontFamily" = "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace";
+      "editor.fontLigatures" = true;
+      "terminal.integrated.fontFamily" = "'Lilex Nerd Font', 'Lilex', 'IBM Plex Mono', monospace";
+      "window.autoDetectColorScheme" = true;
+      "window.controlsStyle" = "hidden";
+    };
+  };
 
+  # Antigravity Hub: inherit the system light/dark mode unless the user picked one.
+  home.activation.antigravityHubThemeMode = config.lib.dag.entryAfter [ "writeBoundary" ] ''
     ag_hub_cfg="$HOME/.gemini/config/config.json"
     if [ -f "$ag_hub_cfg" ] && [ ! -L "$ag_hub_cfg" ]; then
       cur_ag_mode="$(${pkgs.jq}/bin/jq -r '.userSettings.themeMode // ""' "$ag_hub_cfg" 2>/dev/null || true)"
