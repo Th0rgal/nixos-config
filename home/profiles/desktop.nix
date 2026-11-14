@@ -17,6 +17,7 @@ in
     ./core.nix
     ../modules/cloud-mounts.nix
     ../modules/rbw.nix
+    ../modules/backup.nix
     inputs.folio.homeManagerModules.default
   ];
 
