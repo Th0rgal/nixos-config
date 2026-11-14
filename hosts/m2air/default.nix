@@ -21,6 +21,9 @@ in
   networking.hostName = "m2air";
 
   omarchnix = {
+    # Live systemd job tree on the boot console (also answers the LUKS prompt).
+    # Roll back from the GRUB menu, or set this to false, if the console misbehaves.
+    boot.bootvine.enable = true;
     containers.enable = true;
     services.sharing = {
       airdrop.enable = true;
