@@ -16,9 +16,10 @@ let
       label = "iCloud";
       description = "Apple iCloud Drive";
       mountPoint = "${cfg.baseDir}/Apple";
-      # `iclouddrive` does not implement server-push ChangeNotify; 5m keeps
-      # folder traversal snappy while picking up iPhone/Mac uploads promptly.
-      dirCacheTime = "5m";
+      # `iclouddrive` does not implement server-push ChangeNotify; 15m paired with
+      # `rclone-keepwarm.timer` keeps root traversal instant in Flea while still
+      # picking up external iPhone/Mac uploads promptly.
+      dirCacheTime = "15m";
       extraArgs = [ ];
     };
     google = {
@@ -72,6 +73,14 @@ let
         ${pkgs.coreutils}/bin/mkdir -p "$mp"
       '';
 
+      warmMount = pkgs.writeShellScript "rclone-warm-${m.remote}" ''
+        mp=${lib.escapeShellArg m.mountPoint}
+        (
+          ${pkgs.coreutils}/bin/timeout 25 ${pkgs.coreutils}/bin/ls -1 "$mp" >/dev/null 2>&1 || true
+        ) >/dev/null 2>&1 &
+        exit 0
+      '';
+
       mountArgs = [
         "${pkgs.rclone}/bin/rclone"
         "mount"
@@ -79,6 +88,8 @@ let
         m.mountPoint
         "--devname"
         m.label
+        "--attr-timeout"
+        "5s"
         "--vfs-cache-mode"
         "full"
         "--vfs-cache-max-size"
@@ -120,6 +131,7 @@ let
         ExecCondition = "${checkRemote}";
         ExecStartPre = "${prepareMount}";
         ExecStart = lib.escapeShellArgs mountArgs;
+        ExecStartPost = "-${warmMount}";
         ExecStop = "/run/wrappers/bin/fusermount3 -uz ${lib.escapeShellArg m.mountPoint}";
         Restart = "on-failure";
         RestartSec = 10;
@@ -293,7 +305,7 @@ in
       default = "link.html";
       description = ''
         Preferred representation for native Google Docs/Sheets/Slides (`link.html`
-        opens live web docs in Brave on double-click; set to `docx,xlsx,pptx,svg`
+        opens live web docs in Helium on double-click; set to `docx,xlsx,pptx,svg`
         for on-the-fly Office conversion).
       '';
     };
@@ -337,6 +349,44 @@ in
     systemd.user.services = {
       rclone-apple = mkMountService "apple" mounts.apple;
       rclone-google = mkMountService "google" mounts.google;
+
+      # Periodically warm the top-level cloud mount directories so OAuth / iCloud
+      # sessions stay authenticated and root VFS listings remain cached in RAM
+      # across overnight idle and laptop sleep/wake cycles.
+      rclone-keepwarm = {
+        Unit = {
+          Description = "Keep iCloud Drive & Google Drive root VFS directory caches warm";
+          After = [
+            "rclone-apple.service"
+            "rclone-google.service"
+          ];
+        };
+        Service = {
+          Type = "oneshot";
+          ExecStart = pkgs.writeShellScript "rclone-keepwarm" ''
+            for mp in ${lib.escapeShellArg mounts.apple.mountPoint} ${lib.escapeShellArg mounts.google.mountPoint}; do
+              if ${pkgs.util-linux}/bin/mountpoint -q "$mp" 2>/dev/null; then
+                ${pkgs.coreutils}/bin/timeout 25 ${pkgs.coreutils}/bin/ls -1 "$mp" >/dev/null 2>&1 || true
+              fi
+            done
+          '';
+        };
+      };
+    };
+
+    systemd.user.timers.rclone-keepwarm = {
+      Unit = {
+        Description = "Periodic VFS root cache & session keepalive for cloud mounts";
+      };
+      Timer = {
+        OnStartupSec = "45s";
+        OnCalendar = "*:0/10";
+        AccuracySec = "30s";
+        Persistent = false;
+      };
+      Install = {
+        WantedBy = [ "timers.target" ];
+      };
     };
   };
 }

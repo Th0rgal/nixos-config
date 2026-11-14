@@ -1,6 +1,8 @@
 # Core CLI & developer Home Manager profile for Thomas (safe on headless servers and GUI desktops alike).
 {
   config,
+  inputs,
+  pkgs,
   ...
 }:
 let
@@ -11,6 +13,27 @@ in
     ../modules/ssh-config.nix
     ../modules/agent-shims.nix
     ../modules/opencode.nix
+    inputs.nix-index-database.homeModules.nix-index
+  ];
+
+  # `nix-locate <file>` and `, <command>` (run any nixpkgs program without installing it),
+  # backed by the prebuilt database from `inputs.nix-index-database`.
+  programs.nix-index.enable = true;
+  programs.nix-index-database.comma.enable = true;
+
+  # Syntax-highlighted, side-aware diffs for `git diff` / `git show` / `git log -p`.
+  programs.delta = {
+    enable = true;
+    enableGitIntegration = true;
+    options = {
+      navigate = true;
+      line-numbers = true;
+    };
+  };
+
+  home.packages = [
+    pkgs.nix-tree # interactive closure-size browser: `nix-tree /run/current-system`
+    pkgs.nixd # Nix language server for editors
   ];
 
   programs.git = {

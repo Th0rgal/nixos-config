@@ -179,21 +179,34 @@ let
         rsvg-convert -w 960 -h 600 -f png -o "$out/preview.png" "${wallpaperSvg}"
       '';
 
-  # Cursor-style 1px neutral hairline & frosted glass overrides for Omarchy Shell surfaces.
-  # Note: Qt Quick `Rectangle` paints `border` directly into the outer Wayland ring rather than
-  # compositing over `color`, and `polkit`/`lock` share `border-alpha` with `border-error`.
-  # Pre-compositing the ~12% neutral hairline onto the card surface (`#38383b` dark / `#d4d4d8` light)
-  # at `border-alpha = 0.90` keeps `omarchy-glass` (`ignore_alpha = 0.15`) seamless to the edge,
-  # prevents bright-window bleed around cards, and keeps `border-error` vibrant.
+  # Cursor/macOS-style Balanced Readable Glass overrides for Omarchy Shell surfaces.
+  # Design invariants:
+  # 1. `surfaceAlpha` (~0.45 dark / ~0.48 light; 0.58 on compact tooltips) matches the
+  #    frosted blur aesthetic of Status Bar / Dock / Spotlight while keeping dense
+  #    multi-line text (Clipboard, Audio/Network panels, Notifications) effortless to read.
+  # 2. `scrim-alpha = 0.0` (< Hyprland `ignore_alpha = 0.05`) ensures fullscreen
+  #    `OverlayWindow` surfaces (Clipboard, Menu, Emojis, Polkit) skip blurring outside
+  #    the card bounding box — keeping the surrounding desktop sharp and avoiding
+  #    fullscreen Kawase blur GPU cost.
+  # 3. Qt Quick `Rectangle.border` replaces outer pixel alpha directly rather than
+  #    compositing over `color`, and `polkit`/`lock` share `border-alpha` with
+  #    `border-error`. Pre-mixing ~18% `foreground` onto `background` (`#434346` dark /
+  #    `#cfcfd3` light) at `border-alpha = 0.55` (`0.65` on `polkit`/`lock`) keeps the
+  #    1px border well above `ignore_alpha = 0.05` (no unblurred halo) and keeps
+  #    `border-error` vibrant.
   mkShellSectionOverrides =
     palette:
     let
       isLight = (palette.mode or "dark") == "light";
-      surfaceAlpha = if isLight then "0.90" else "0.88";
-      borderColor = if isLight then "#d4d4d8" else "#38383b";
-      borderActiveColor = if isLight then "#b8b8be" else "#4a4a4e";
-      borderAlpha = "0.90";
-      scrimAlpha = if isLight then "0.20" else "0.35";
+      surfaceAlpha = if isLight then "0.48" else "0.45";
+      cardAlpha = "0.48";
+      tooltipAlpha = "0.58";
+      borderColor = if isLight then "#cfcfd3" else "#434346";
+      borderActiveColor = if isLight then "#a8a8ae" else "#5c5c62";
+      borderAlpha = "0.55";
+      authBorderAlpha = "0.65";
+      selectedBgAlpha = if isLight then "0.10" else "0.12";
+      selectedBorderAlpha = "0.12";
       bg = builtins.toJSON palette.background;
       fg = builtins.toJSON palette.foreground;
       muted = builtins.toJSON palette.muted;
@@ -205,7 +218,7 @@ let
     {
       notifications = ''
         background       = ${bg}
-        background-alpha = ${surfaceAlpha}
+        background-alpha = ${cardAlpha}
         text             = ${fg}
         border           = ${border}
         border-alpha     = ${borderAlpha}
@@ -224,7 +237,7 @@ let
 
       tooltip = ''
         background       = ${bg}
-        background-alpha = 0.94
+        background-alpha = ${tooltipAlpha}
         text             = ${fg}
         border           = ${border}
         border-alpha     = ${borderAlpha}
@@ -239,12 +252,12 @@ let
         border-alpha              = ${borderAlpha}
         border-width              = 1
         scrim                     = "#000000"
-        scrim-alpha               = ${scrimAlpha}
+        scrim-alpha               = 0.0
         selected-background       = ${fg}
-        selected-background-alpha = 0.09
+        selected-background-alpha = ${selectedBgAlpha}
         selected-text             = ${fg}
         selected-border           = ${fg}
-        selected-border-alpha     = 0.10
+        selected-border-alpha     = ${selectedBorderAlpha}
       '';
 
       launcher = ''
@@ -255,45 +268,45 @@ let
         border-alpha              = ${borderAlpha}
         border-width              = 1
         scrim                     = "#000000"
-        scrim-alpha               = ${scrimAlpha}
+        scrim-alpha               = 0.0
         selected-background       = ${fg}
-        selected-background-alpha = 0.09
+        selected-background-alpha = ${selectedBgAlpha}
         selected-text             = ${fg}
         selected-border           = ${fg}
-        selected-border-alpha     = 0.10
+        selected-border-alpha     = ${selectedBorderAlpha}
       '';
 
       polkit = ''
         background       = ${bg}
-        background-alpha = 0.90
+        background-alpha = ${cardAlpha}
         text             = ${fg}
         text-error       = ${red}
         border           = ${border}
         border-error     = ${red}
-        border-alpha     = ${borderAlpha}
+        border-alpha     = ${authBorderAlpha}
         border-width     = 1
         scrim            = "#000000"
-        scrim-alpha      = ${scrimAlpha}
+        scrim-alpha      = 0.0
         accent           = ${accent}
       '';
 
       lock = ''
         background       = ${bg}
-        background-alpha = 0.84
+        background-alpha = ${cardAlpha}
         text             = ${fg}
         placeholder      = ${muted}
         text-error       = ${red}
         border           = ${border}
         border-active    = ${borderActive}
         border-error     = ${red}
-        border-alpha     = ${borderAlpha}
+        border-alpha     = ${authBorderAlpha}
         border-width     = 1
         selection        = ${accent}
         selection-alpha  = 0.35
       '';
 
       flea = ''
-        background-alpha = ${if isLight then "0.48" else "0.45"}
+        background-alpha = ${surfaceAlpha}
       '';
 
       controls = ''

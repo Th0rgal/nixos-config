@@ -2,11 +2,24 @@
   description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, spark, vm), built on Th0rgal/omarchnix";
 
   inputs = {
+    # Note for Thomas: Nix flakes forbid `if builtins.pathExists ...` inside `inputs`
+    # (and pure evaluation sandboxes paths outside `nixos-config/`), so this stays pointed
+    # at GitHub for portability across `spark`, VMs, and CI. On machines where
+    # `/home/thomas/work/nixos/omarchnix/flake.nix` exists locally, our `nixos-rebuild`
+    # and `nh` wrappers (`hosts/common/thomas-user.nix`) automatically inject
+    # `--override-input omarchnix path:/home/thomas/work/nixos/omarchnix --no-write-lock-file`.
     omarchnix.url = "github:Th0rgal/omarchnix";
 
     wallpapers = {
       url = "github:Th0rgal/wallpapers";
       flake = false;
+    };
+
+    # Prebuilt weekly `nix-index` database (`nix-locate`, `comma`, command-not-found)
+    # so the multi-GiB index never has to be generated on the laptop.
+    nix-index-database = {
+      url = "github:nix-community/nix-index-database";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     nixpkgs.follows = "omarchnix/nixpkgs";
@@ -101,6 +114,52 @@
           exec ${nixpkgs.legacyPackages.${system}.nixfmt}/bin/nixfmt \
             $(git ls-files '*.nix' 2>/dev/null || find . -name '*.nix' -not -path './.git/*')
         ''
+      );
+
+      # Report-only linters (`statix` anti-patterns, `deadnix` unused bindings):
+      # `nix run .#lint`. Neither rewrites files; `nix fmt` stays the only formatter.
+      apps = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          lint = pkgs.writeShellApplication {
+            name = "nix-lint";
+            runtimeInputs = [
+              pkgs.statix
+              pkgs.deadnix
+            ];
+            text = ''
+              status=0
+              statix check . || status=1
+              deadnix --fail . || status=1
+              exit "$status"
+            '';
+          };
+        in
+        {
+          lint = {
+            type = "app";
+            program = "${lint}/bin/nix-lint";
+            meta.description = "Run statix and deadnix over the flake (report-only)";
+          };
+        }
+      );
+
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          default = pkgs.mkShellNoCC {
+            packages = [
+              pkgs.nixfmt
+              pkgs.nixd
+              pkgs.statix
+              pkgs.deadnix
+            ];
+          };
+        }
       );
     };
 }
