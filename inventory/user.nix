@@ -2,6 +2,13 @@
   username = "thomas";
   fullName = "Thomas Marchand";
   email = "thomas@lfglabs.dev";
+
+  # Identity for commits made by coding agents (Claude, OpenCode, Antigravity).
+  # Matches the Orb development identity used in mission sandboxes.
+  agent = {
+    name = "Thomas Marchand (agent)";
+    email = "agent@thomas.md";
+  };
   defaultTimeZone = "Europe/Lisbon";
 
   hindsight = {

@@ -9,6 +9,10 @@
 let
   inherit (inventory) user;
   secretPath = config.thomas.secrets.path;
+  agentGit = import ../../lib/agent-git.nix {
+    inherit pkgs;
+    inherit (user) agent;
+  };
 
 in
 {
@@ -105,8 +109,8 @@ in
     orb-desktop
     folio-desktop
     notion-calendar
-    antigravity-hub
-    claude-desktop
+    (agentGit.wrap antigravity-hub)
+    (agentGit.wrap claude-desktop)
   ];
 
   # Keep /nix/store, user profiles, and the 476 MiB /boot EFI partition lean automatically
