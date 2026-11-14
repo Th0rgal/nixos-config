@@ -12,6 +12,12 @@ let
     GIT_AUTHOR_EMAIL = agent.email;
     GIT_COMMITTER_NAME = agent.name;
     GIT_COMMITTER_EMAIL = agent.email;
+    # Never sign agent commits with Thomas's key (signing is on by default for him).
+    GIT_CONFIG_COUNT = "2";
+    GIT_CONFIG_KEY_0 = "commit.gpgsign";
+    GIT_CONFIG_VALUE_0 = "false";
+    GIT_CONFIG_KEY_1 = "tag.gpgsign";
+    GIT_CONFIG_VALUE_1 = "false";
   };
   setFlags = lib.concatStringsSep " " (
     lib.mapAttrsToList (k: v: "--set ${k} ${lib.escapeShellArg v}") env

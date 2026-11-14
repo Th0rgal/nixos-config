@@ -40,6 +40,14 @@ in
 
   programs.git = {
     enable = true;
+    # Every commit and tag is signed with the SSH key; `git log --show-signature`
+    # verifies locally against allowed_signers.
+    signing = {
+      format = "ssh";
+      key = "${config.home.homeDirectory}/.ssh/thomas-signing.pub";
+      signByDefault = true;
+      allowedSigners = ''${user.email} namespaces="git" ${user.sshKeys.gitSigning}'';
+    };
     settings = {
       user = {
         name = user.fullName;
