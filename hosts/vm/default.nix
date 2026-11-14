@@ -42,7 +42,15 @@ in
     };
   };
 
-  home-manager.users.${user.username} = import ../../home/profiles/desktop.nix;
+  home-manager.users.${user.username} = {
+    imports = [ ../../home/profiles/desktop.nix ];
+    # First-install release of this user's home state; never bump it to "upgrade".
+    home.stateVersion = "25.05";
+  };
+
+  # First-install release of this host's state. Never bump it to "upgrade"; it only
+  # changes when the machine is reinstalled.
+  system.stateVersion = "25.05";
 
   environment.systemPackages = with pkgs; [
     helium

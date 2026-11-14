@@ -1,11 +1,13 @@
 # MacBook Air M2 — Thomas's personal NixOS host configuration.
 {
+  config,
   lib,
   pkgs,
   ...
 }:
 let
   user = import ../../inventory/user.nix;
+  secretPath = config.thomas.secrets.path;
 
   # Run Signal Desktop natively on Wayland without Electron's CSD titlebar or
   # Linux menu bar, while keeping fcitx5 dead-key IME and gnome-keyring storage.
@@ -71,6 +73,7 @@ in
   imports = [
     ../common/thomas-user.nix
     ./hardware.nix
+    ./secrets.nix
   ];
 
   networking.hostName = "m2air";
@@ -172,7 +175,15 @@ in
     };
   };
 
-  home-manager.users.${user.username} = import ../../home/profiles/desktop.nix;
+  home-manager.users.${user.username} = {
+    imports = [ ../../home/profiles/desktop.nix ];
+    # First-install release of this user's home state; never bump it to "upgrade".
+    home.stateVersion = "25.05";
+  };
+
+  # First-install release of this host's state. Never bump it to "upgrade"; it only
+  # changes when the machine is reinstalled.
+  system.stateVersion = "25.05";
 
   # Proprietary desktop binaries (Antigravity, Claude Desktop, Widevine CDM);
   # allow only those unfree packages rather than the whole unfree set.
@@ -229,7 +240,7 @@ in
       hostName = "10.88.50.30";
       protocol = "ssh-ng";
       sshUser = "nixbuild";
-      sshKey = "/root/.ssh/nix-builder-spark";
+      sshKey = secretPath "nix_builder_spark_key" "/root/.ssh/nix-builder-spark";
       systems = [ "aarch64-linux" ];
       maxJobs = 8;
       speedFactor = 8;
@@ -245,7 +256,7 @@ in
     connect-timeout = 5;
     fallback = true;
     # Sign everything built here so the untrusted builder account can receive it.
-    secret-key-files = [ "/etc/nix/signing-key.sec" ];
+    secret-key-files = [ (secretPath "nix_signing_key" "/etc/nix/signing-key.sec") ];
   };
   programs.ssh = {
     knownHosts."10.88.50.30".publicKey =
