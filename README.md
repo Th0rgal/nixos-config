@@ -29,13 +29,13 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 - **Disable Auto-Sleep (Theine equivalent):** Click the coffee mug icon (``) in the top-right status bar, press `Option + Shift + I` / `Cmd + Shift + I`, or run `omarchy-toggle-idle toggle`.
 - **Touchpad Scrolling:** Inverted (`natural_scroll = false`, so content goes up when fingers go up) and smoothed (`scroll_factor = 0.5`).
 - **Keyboard Backlight (`m2air`):** `50%` default (`omarchnix.hardware.m2air.keyboardBacklight.defaultBrightness = 50;`), adjustable via `Option/Ctrl/Cmd + F1/F2`, status bar Display panel, or `omarchnix kbd-backlight 50%`.
-- **Battery Charge Threshold (`m2air`):** Set to `100%` by default (`omarchnix.hardware.m2air.chargeControlEndThreshold = 100;`), adjustable live via `/sys/class/power_supply/macsmc-battery/charge_control_end_threshold`.
+- **Battery Charge Threshold (`m2air`):** Set to `90%` by default (`omarchnix.hardware.m2air.chargeControlEndThreshold = 90;`), adjustable live via `/sys/class/power_supply/macsmc-battery/charge_control_end_threshold`.
 
 ## Touch ID Activation (`m2air`)
 
 1. Switch to the `m2air` flake configuration and stage the verified Aurora Stage 2 bootloader (`m1n1/boot.bin`, preserving `m1n1/boot.bin.pre-aurora`):
    ```bash
-   sudo nixos-rebuild switch --flake ~/nixos-config#m2air
+   rebuild
    sudo omarchnix-install-stage2 /boot
    sudo reboot
    ```
@@ -53,8 +53,8 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 ## Common Commands
 
 ```bash
-# Switch configuration on MacBook Air M2:
-sudo nixos-rebuild switch --flake ~/nixos-config#m2air
+# Switch configuration (uses ../omarchnix when checked out; --locked for flake.lock only):
+rebuild
 
 # Build & launch a turnkey QEMU desktop VM with full desktop + wallpapers:
 nixos-rebuild build-vm --flake ~/nixos-config#vm
@@ -62,4 +62,12 @@ nixos-rebuild build-vm --flake ~/nixos-config#vm
 
 # Pull latest omarchnix or wallpapers upstream changes:
 cd ~/nixos-config && nix flake update omarchnix wallpapers
+
+# Backups (docs/backup.md) and secrets bootstrap:
+backup status
+sudo bootstrap-secrets
 ```
+
+The fleet SSH map, lean-mesh peers and remote builder live in the private
+[`nixos-inventory`](https://github.com/Th0rgal/nixos-inventory) repository (the `inventory`
+flake input); CI and forks evaluate against [`ci/inventory-stub`](ci/inventory-stub/default.nix).

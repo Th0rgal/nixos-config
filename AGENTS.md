@@ -16,27 +16,27 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 │   ├── flake.lock             # Pins omarchnix, folio, and Th0rgal/wallpapers
 │   ├── inventory/
 │   │   ├── user.nix           # User identity, email, SSH public keys, World Clock cities
-│   │   ├── fleet.nix          # Declarative SSH/Tailscale host inventory (spark, macbook, hetzner)
 │   │   └── wallpapers.nix     # Default & Space 1..8 wallpaper mapping against inputs.wallpapers
 │   ├── hosts/
 │   │   ├── common/
-│   │   │   └── thomas-user.nix # Shared system user account, groups & authorizedKeys
+│   │   │   ├── desktop.nix    # Settings shared by every desktop host (omarchnix, theme, HM profile)
+│   │   │   └── thomas-user.nix # User account, groups, authorizedKeys & the `rebuild` command
 │   │   ├── m2air/
-│   │   │   ├── default.nix    # Personal m2air NixOS config (Aurora Touch ID, 100% battery, desktop apps)
-│   │   │   └── hardware.nix   # Partition UUIDs (BOOT=C650-1003, LUKS=aa0403dd-...)
+│   │   │   ├── default.nix    # Personal m2air NixOS config (Aurora Touch ID, 90% charge cap, desktop apps)
+│   │   │   ├── hardware.nix   # Partition UUIDs, GRUB (5 generations) & /boot space pre-switch check
+│   │   │   └── secrets.nix    # sops-nix: builder key, Nix signing key, restic password
 │   │   ├── spark/
-│   │   │   └── default.nix    # ARM64 workstation & server host (uses home/profiles/desktop.nix)
+│   │   │   └── default.nix    # ARM64 workstation config (evaluated in CI; the real spark runs Ubuntu)
 │   │   └── vm/
 │   │       └── default.nix    # Turnkey QEMU desktop VM with auto-login & wallpapers
 │   └── home/
 │       ├── assets/
 │       │   └── discord.svg    # Official Discord icon override for Vesktop
 │       ├── modules/
-│       │   ├── ssh-config.nix # Typed SSH config generator from inventory/fleet.nix
+│       │   ├── ssh-config.nix # Typed SSH config generator from the private `inventory.fleet`
 │       │   ├── agent-shims.nix # Guard shims enforcing bun & turbo-lean
 │       │   ├── opencode.nix   # OpenCode v2 CLI & Orb Router provider config
-│       │   ├── cloud-mounts.nix # On-demand rclone FUSE mounts (~/Cloud/Apple & ~/Cloud/Google)
-│       │   └── rbw.nix        # rbw Bitwarden CLI/agent + opt-in Touch ID pinentry (`rbw-touchid enroll`)
+│       │   └── backup.nix     # Daily restic backup to Google Drive (see docs/backup.md)
 │       ├── profiles/
 │       │   ├── core.nix       # Headless CLI, Git, SSH, OpenCode, CLI tools (shared across all hosts)
 │       │   └── desktop.nix    # Full GUI, macOS suite, Space wallpapers, MIME defaults, Ghostty
@@ -81,7 +81,8 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 
 | Change Type | Where to Edit |
 | :--- | :--- |
-| **Personal SSH hosts, git/user identity, Space wallpaper mapping** | [`nixos-config/inventory/fleet.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/fleet.nix), [`nixos-config/inventory/user.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/user.nix), [`nixos-config/inventory/wallpapers.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/wallpapers.nix) |
+| **Personal SSH hosts, lean-mesh peers, remote builder** | [`nixos-inventory`](file:///home/thomas/work/nixos/nixos-inventory) (private repo, `inventory` flake input; then `nix flake update inventory`) |
+| **Git/user identity, Space wallpaper mapping** | [`nixos-config/inventory/user.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/user.nix), [`nixos-config/inventory/wallpapers.nix`](file:///home/thomas/work/nixos/nixos-config/inventory/wallpapers.nix) |
 | **Personal packages, host mounts/UUIDs, personal desktop apps or VM settings** | [`nixos-config/hosts/m2air/default.nix`](file:///home/thomas/work/nixos/nixos-config/hosts/m2air/default.nix), [`nixos-config/home/profiles/desktop.nix`](file:///home/thomas/work/nixos/nixos-config/home/profiles/desktop.nix), [`nixos-config/hosts/vm/default.nix`](file:///home/thomas/work/nixos/nixos-config/hosts/vm/default.nix) |
 | **Shared Omarchy desktop behavior, macOS-feel plugins (Dock, Mission Control, Spotlight, Touch ID HUD, Space Wallpapers), Hyprland bindings, reusable M2 Air hardware module** | [`omarchnix/home/macos.nix`](file:///home/thomas/work/nixos/omarchnix/home/macos.nix), [`omarchnix/pkgs/plugins/`](file:///home/thomas/work/nixos/omarchnix/pkgs/plugins), [`omarchnix/home/hyprland.nix`](file:///home/thomas/work/nixos/omarchnix/home/hyprland.nix), [`omarchnix/modules/hardware-m2air.nix`](file:///home/thomas/work/nixos/omarchnix/modules/hardware-m2air.nix) |
 | **Theme palettes & frosted-glass surface tokens (`shell.toml`)** | [`nixos-config/themes/starship-subtle/default.nix`](file:///home/thomas/work/nixos/nixos-config/themes/starship-subtle/default.nix) (Starship Dark/Light overrides), [`omarchnix/pkgs/omarchy-shell.nix`](file:///home/thomas/work/nixos/omarchnix/pkgs/omarchy-shell.nix) (`default/themed/shell.toml.tpl` defaults for all bundled themes) |
@@ -91,21 +92,24 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 ## 3. Common Workflows
 
 ### A. Full System & Home Manager Rebuild
-From [`/home/thomas/work/nixos/nixos-config`](file:///home/thomas/work/nixos/nixos-config):
+`rebuild` (from [`hosts/common/thomas-user.nix`](file:///home/thomas/work/nixos/nixos-config/hosts/common/thomas-user.nix)) is the one entry point. It runs `nh os <verb>` on `nixos-config` and passes `--override-input omarchnix path:../omarchnix` when that checkout exists. Stock `nixos-rebuild` and `nh` are not wrapped, and no lock file changes unless asked.
 ```bash
-cd /home/thomas/work/nixos/nixos-config
-
-# Rebuild using the pushed omarchnix & wallpapers inputs in flake.lock:
-sudo nixos-rebuild switch --flake .#m2air
-
-# Or test local uncommitted/unmerged changes in ../omarchnix directly:
-sudo nixos-rebuild switch --flake .#m2air \
-  --override-input omarchnix path:/home/thomas/work/nixos/omarchnix
+rebuild                # switch, using local ../omarchnix if present
+rebuild boot|test|build|build-vm|dry
+rebuild --locked       # build exactly what flake.lock pins
+rebuild --bump-orb     # first move omarchnix's orb input to Th0rgal/orb master
 
 # Spin up a turnkey desktop VM (with full macOS suite & Space wallpapers):
 nixos-rebuild build-vm --flake .#vm
 ./result/bin/run-omarchnix-vm-vm
 ```
+- **Rollbacks:** GRUB keeps **5** generations; a pre-switch check refuses `switch`/`boot` when `/boot` can't fit a new kernel/initrd pair.
+- **Private input:** `inventory` is fetched over SSH as `thomas`, so build with `rebuild` (or as your user), not plain `sudo nixos-rebuild`.
+- **Lint & CI:** `nix fmt`, `nix run .#lint` (statix + deadnix); CI evaluates every host against `ci/inventory-stub`.
+
+### Secrets & Backups
+- **Secrets:** sops-nix, `secrets/m2air.yaml`, encrypted to the host key and the Bitwarden-held backup age key. `sudo bootstrap-secrets` creates or extends it; each secret is wired only once present.
+- **Backups:** daily restic to `gdrive:01 — Backups & Infra/m2air-restic` on AC power, monthly verify; `backup status|now|snapshots|restore|mount`. Runbook: [`docs/backup.md`](file:///home/thomas/work/nixos/nixos-config/docs/backup.md).
 
 ### B. Applying Home Manager / Hyprland Changes Live (Without `sudo` or Rebooting)
 Hyprland runs in **Lua configuration mode** (`~/.config/hypr/hyprland.lua`). Note that `hyprctl keyword` is not used in Lua mode; instead, build the generated config file from the flake, copy it into `~/.config`, and run `hyprctl reload`:
@@ -165,7 +169,7 @@ git add flake.lock && git commit -m "chore(flake): update inputs" && git push
   ```
 
 ### Battery Charge Cap (`macsmc-battery`)
-- Default in NixOS config: **`100%`** (`omarchnix.hardware.m2air.chargeControlEndThreshold = 100;`).
+- Default in NixOS config: **`90%`** (`omarchnix.hardware.m2air.chargeControlEndThreshold = 90;`).
 - Change live at any time without `sudo`:
   ```bash
   echo 80 > /sys/class/power_supply/macsmc-battery/charge_control_end_threshold
