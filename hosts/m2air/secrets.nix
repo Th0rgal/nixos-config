@@ -11,10 +11,11 @@
   config,
   lib,
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
+  user = inventory.user;
   file = ../../secrets/m2air.yaml;
   present = builtins.pathExists file;
   content = if present then builtins.readFile file else "";

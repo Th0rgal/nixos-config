@@ -3,10 +3,11 @@
   config,
   inputs,
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
+  user = inventory.user;
 in
 {
   imports = [

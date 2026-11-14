@@ -2,10 +2,11 @@
 # with the full Omarchnix macOS desktop suite and `Th0rgal/wallpapers` preloaded.
 {
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
+  user = inventory.user;
 in
 {
   imports = [

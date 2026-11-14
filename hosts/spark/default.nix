@@ -1,7 +1,7 @@
 # NVIDIA Grace / DGX Spark — Thomas's ARM64 workstation & server configuration.
-{ ... }:
+{ inventory, ... }:
 let
-  user = import ../../inventory/user.nix;
+  user = inventory.user;
 in
 {
   imports = [

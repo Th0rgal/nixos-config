@@ -118,6 +118,22 @@
         "type": "github"
       }
     },
+    "inventory": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794666854,
+        "narHash": "sha256-BQGUPPbvt0+njsdPs5V5AwaYWUNnrL9gl6pZ1MjOvzU=",
+        "ref": "refs/heads/main",
+        "rev": "cba2b94d88a46e221b52e005aea4543180d97160",
+        "revCount": 1,
+        "type": "git",
+        "url": "ssh://git@github.com/Th0rgal/nixos-inventory.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/Th0rgal/nixos-inventory.git"
+      }
+    },
     "nix-index-database": {
       "inputs": {
         "nixpkgs": [
@@ -380,6 +396,7 @@
           "omarchnix",
           "home-manager"
         ],
+        "inventory": "inventory",
         "nix-index-database": "nix-index-database",
         "nixos-aurora": [
           "omarchnix",

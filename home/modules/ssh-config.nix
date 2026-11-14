@@ -2,10 +2,11 @@
   config,
   lib,
   pkgs,
+  inventory,
   ...
 }:
 let
-  fleet = import ../../inventory/fleet.nix;
+  inherit (inventory) fleet;
 
   allPalomaAliases = lib.concatMap (h: h.aliases) fleet.palomaFleet;
   controlMasterHosts = lib.filter (h: h.controlMaster or false) fleet.palomaFleet;

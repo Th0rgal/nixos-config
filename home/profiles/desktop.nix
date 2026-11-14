@@ -5,18 +5,17 @@
   lib,
   options,
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
-  wallpapers = import ../../inventory/wallpapers.nix inputs.wallpapers;
+  user = inventory.user;
+  inherit (inventory) wallpapers;
   starshipSubtle = import ../../themes/starship-subtle { inherit pkgs lib; };
 in
 {
   imports = [
     ./core.nix
-    ../modules/cloud-mounts.nix
-    ../modules/rbw.nix
     ../modules/backup.nix
     inputs.folio.homeManagerModules.default
   ];
@@ -69,6 +68,9 @@ in
   '';
 
   programs.omarchnix = {
+    cloudMounts.enable = true;
+    rbw.enable = true;
+
     agents = {
       # Skills are managed centrally via `th0rgal/orb-library` (`.orb-lib.lock`),
       # and `~/.config/opencode/opencode.json` is reconciled by `home/modules/opencode.nix`.

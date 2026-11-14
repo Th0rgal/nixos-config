@@ -3,71 +3,13 @@
   config,
   lib,
   pkgs,
+  inventory,
   ...
 }:
 let
-  user = import ../../inventory/user.nix;
+  user = inventory.user;
   secretPath = config.thomas.secrets.path;
 
-  # Run Signal Desktop natively on Wayland without Electron's CSD titlebar or
-  # Linux menu bar, while keeping fcitx5 dead-key IME and gnome-keyring storage.
-  signalFramelessHook = pkgs.writeText "signal-frameless-hook.cjs" ''
-    const Module = require("node:module");
-    const origLoad = Module._load;
-    let WrappedBrowserWindow;
-
-    Module._load = function (request, parent, isMain) {
-      const loaded = origLoad.apply(this, arguments);
-      if (request === "electron" && loaded && typeof loaded === "object") {
-        return new Proxy(loaded, {
-          get(target, prop) {
-            if (prop === "BrowserWindow") {
-              if (!WrappedBrowserWindow) {
-                const OrigBrowserWindow = Reflect.get(target, prop, target);
-                WrappedBrowserWindow = class FramelessBrowserWindow extends OrigBrowserWindow {
-                  constructor(opts = {}) {
-                    const nextOpts = { ...opts, frame: false, autoHideMenuBar: true };
-                    delete nextOpts.titleBarStyle;
-                    super(nextOpts);
-                    super.setMenuBarVisibility(false);
-                  }
-                  setMenuBarVisibility(_visible) {
-                    return super.setMenuBarVisibility(false);
-                  }
-                };
-              }
-              return WrappedBrowserWindow;
-            }
-            return Reflect.get(target, prop, target);
-          },
-        });
-      }
-      return loaded;
-    };
-  '';
-
-  signalDesktopWayland = pkgs.symlinkJoin {
-    name = "signal-desktop-${pkgs.signal-desktop.version}";
-    paths = [ pkgs.signal-desktop ];
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    postBuild = ''
-      cp --remove-destination "$(readlink -f "$out/bin/signal-desktop")" "$out/bin/signal-desktop"
-      chmod 755 "$out/bin/signal-desktop"
-      substituteInPlace "$out/bin/signal-desktop" \
-        --replace-fail "${pkgs.signal-desktop}/share/signal-desktop/app.asar" \
-        "-r ${signalFramelessHook} ${pkgs.signal-desktop}/share/signal-desktop/app.asar"
-      wrapProgram "$out/bin/signal-desktop" \
-        --add-flags "--password-store=gnome-libsecret" \
-        --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --disable-features=WaylandWindowDecorations --enable-wayland-ime=true --wayland-text-input-version=3}}"
-      for desktop in "$out/share/applications/"*.desktop; do
-        if [ -L "$desktop" ]; then
-          cp --remove-destination "$(readlink -f "$desktop")" "$desktop"
-          substituteInPlace "$desktop" --replace-quiet "Exec=signal-desktop" "Exec=$out/bin/signal-desktop"
-        fi
-      done
-    '';
-    inherit (pkgs.signal-desktop) meta;
-  };
 in
 {
   imports = [
@@ -91,48 +33,7 @@ in
       nearby.enable = true;
       kdeconnect.enable = true;
     };
-    mesh = {
-      enable = true;
-      instances = {
-        paloma = {
-          interface = "wg-leanmesh0";
-          nftTable = "lean_mesh";
-          listenPort = 51888;
-          nodeName = "macbook-air";
-          nodeId = 100;
-          overlayAddress = "10.88.0.100/32";
-          stateDir = "/etc/lean-mesh";
-        };
-        personal = {
-          interface = "wg-homemesh0";
-          nftTable = "home_mesh";
-          listenPort = 51891;
-          openFirewallUdp = true;
-          nodeName = "m2air";
-          nodeId = 10;
-          overlayAddress = "10.88.50.10/32";
-          stateDir = "/etc/lean-mesh-personal";
-          roamingPeers = [
-            {
-              peerName = "umbrel";
-              peerId = 20;
-              lanHost = "umbrel.local";
-              lanFallbackHost = "umbrel.home";
-              lanPort = 51891;
-              relayEndpoint = "65.109.98.246:51890";
-            }
-            {
-              peerName = "dgx-spark";
-              peerId = 30;
-              lanHost = "spark-de79.local";
-              lanFallbackHost = "spark-de79.home";
-              lanPort = 51891;
-              relayEndpoint = "65.109.98.246:51890";
-            }
-          ];
-        };
-      };
-    };
+    inherit (inventory) mesh;
     macTether = {
       enable = true;
     };
@@ -200,7 +101,7 @@ in
     helium
     bitwarden-desktop
     telegram-desktop
-    signalDesktopWayland
+    signal-desktop-frameless
     vesktop
     age
     bun
@@ -237,7 +138,7 @@ in
   nix.distributedBuilds = true;
   nix.buildMachines = [
     {
-      hostName = "10.88.50.30";
+      inherit (inventory.builder) hostName;
       protocol = "ssh-ng";
       sshUser = "nixbuild";
       sshKey = secretPath "nix_builder_spark_key" "/root/.ssh/nix-builder-spark";
@@ -259,12 +160,11 @@ in
     secret-key-files = [ (secretPath "nix_signing_key" "/etc/nix/signing-key.sec") ];
   };
   programs.ssh = {
-    knownHosts."10.88.50.30".publicKey =
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQjxSATucT7hVuqjCb+0K7iJKpMsWDmyTjsUKcKBoQ9";
+    knownHosts.${inventory.builder.hostName}.publicKey = inventory.builder.hostKey;
     # Detect half-open `ssh-ng` builder sockets within ~45s if the laptop sleeps or roams
     # instead of blocking `nix-daemon` indefinitely on `read()`.
     extraConfig = ''
-      Host 10.88.50.30
+      Host ${inventory.builder.hostName}
         ConnectTimeout 5
         ServerAliveInterval 15
         ServerAliveCountMax 3

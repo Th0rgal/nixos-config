@@ -10,6 +10,13 @@
     # `--override-input omarchnix path:/home/thomas/work/nixos/omarchnix --no-write-lock-file`.
     omarchnix.url = "github:Th0rgal/omarchnix";
 
+    # Private host inventory (fleet SSH map, lean-mesh topology, remote builder),
+    # github.com/Th0rgal/nixos-inventory. CI substitutes ./ci/inventory-stub.
+    inventory = {
+      url = "git+ssh://git@github.com/Th0rgal/nixos-inventory.git";
+      flake = false;
+    };
+
     wallpapers = {
       url = "github:Th0rgal/wallpapers";
       flake = false;
@@ -44,34 +51,44 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
+      # Everything host and home modules know about Thomas and his machines, passed as
+      # the `inventory` module argument: public identity from ./inventory, fleet data
+      # from the private `inventory` input.
+      inventory = import inputs.inventory // {
+        user = import ./inventory/user.nix;
+        wallpapers = import ./inventory/wallpapers.nix inputs.wallpapers;
+      };
+
       mkPersonalHost =
         args:
         omarchnix.lib.mkHost (
           {
-            extraSpecialArgs = { inherit inputs; };
+            extraSpecialArgs = { inherit inputs inventory; };
           }
           // args
+          // {
+            modules = [
+              { home-manager.extraSpecialArgs = { inherit inventory; }; }
+            ]
+            ++ (args.modules or [ ]);
+          }
         );
+
+      m2air = mkPersonalHost {
+        platform = "m2air-aurora";
+        modules = [
+          ./hosts/m2air
+          ./hosts/m2air/aurora.nix
+        ];
+      };
     in
     {
       nixosConfigurations = {
         # MacBook Air M2 daily driver with Aurora SEP, Touch ID (fprintd), FIDO2 (aurora-fido) & Orb Touch ID signer
-        m2air = mkPersonalHost {
-          platform = "m2air-aurora";
-          modules = [
-            ./hosts/m2air
-            ./hosts/m2air/aurora.nix
-          ];
-        };
+        inherit m2air;
 
-        # Explicit alias for Stage-2 Aurora SEP & Touch ID configuration
-        m2air-aurora = mkPersonalHost {
-          platform = "m2air-aurora";
-          modules = [
-            ./hosts/m2air
-            ./hosts/m2air/aurora.nix
-          ];
-        };
+        # Alias kept for existing `--flake .#m2air-aurora` invocations.
+        m2air-aurora = m2air;
 
         # Stock nixos-apple-silicon fallback (without Stage-2 Aurora SEP)
         m2air-stock = mkPersonalHost {
