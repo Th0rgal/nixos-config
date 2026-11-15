@@ -20,6 +20,7 @@ in
     ../common/desktop.nix
     ./hardware.nix
     ./secrets.nix
+    ./bench.nix
   ];
 
   networking.hostName = "m2air";
