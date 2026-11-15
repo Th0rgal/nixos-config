@@ -1,5 +1,5 @@
-# Coding agents commit as `inventory.user.agent` (agent@thomas.md) with no tool
-# attribution trailers. Claude Code and Claude Desktop's Code tab read
+# Coding agents commit as `inventory.user.agent` (agent@thomas.md), signed with the
+# Git signing key, with no tool attribution trailers. Claude Code and Claude Desktop's Code tab read
 # ~/.claude/settings.json; OpenCode, Antigravity and Claude Desktop are also wrapped
 # with the same GIT_AUTHOR_* / GIT_COMMITTER_* variables (lib/agent-git.nix).
 { inventory, pkgs, ... }:

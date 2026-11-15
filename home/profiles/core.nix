@@ -46,7 +46,12 @@ in
       format = "ssh";
       key = "${config.home.homeDirectory}/.ssh/thomas-signing.pub";
       signByDefault = true;
-      allowedSigners = ''${user.email} namespaces="git" ${user.sshKeys.gitSigning}'';
+      # Agent commits (lib/agent-git.nix) are signed with the same key under the
+      # agent address.
+      allowedSigners = ''
+        ${user.email} namespaces="git" ${user.sshKeys.gitSigning}
+        ${user.agent.email} namespaces="git" ${user.sshKeys.gitSigning}
+      '';
     };
     settings = {
       user = {
