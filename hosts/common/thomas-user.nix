@@ -12,13 +12,15 @@ let
   # Single explicit entry point for rebuilding this machine. Stock `nixos-rebuild`
   # and `nh` stay untouched; this script only decides which inputs to pass.
   #
-  #   rebuild                 # nh os switch, using ../omarchnix if it is checked out
+  #   rebuild                 # nh os switch, using ../omarchnix if it is checked out and the latest Orb master
   #   rebuild boot|test|build|build-vm|dry
-  #   rebuild --locked        # ignore the local checkout, build exactly flake.lock
-  #   rebuild --bump-orb      # first move omarchnix's `orb` input to Th0rgal/orb master
+  #   rebuild --locked        # ignore the local checkout and Orb master, build exactly flake.lock
+  #   rebuild --bump-orb      # also write Th0rgal/orb master into omarchnix's flake.lock
   #   rebuild -- <args>       # extra arguments forwarded to nix
   #
-  # Nothing here ever edits a lock file except `--bump-orb`, and only when asked.
+  # Nothing here ever edits a lock file except `--bump-orb`, and only when asked: the
+  # latest Orb comes from a build-time `--override-input omarchnix/orb`, so checkouts
+  # shared with other sessions stay untouched.
   rebuild = pkgs.writeShellApplication {
     name = "rebuild";
     runtimeInputs = [
@@ -64,6 +66,10 @@ let
         fi
         echo "rebuild: using local omarchnix at $omarchnix ($(git -C "$omarchnix" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$omarchnix" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
         overrides=(--override-input omarchnix "path:$omarchnix" --no-write-lock-file)
+        if [ "$bump_orb" = 0 ]; then
+          echo "rebuild: using the latest Orb master (rebuild --locked builds the pinned one)" >&2
+          overrides+=(--override-input omarchnix/orb github:Th0rgal/orb)
+        fi
       elif [ "$bump_orb" = 1 ]; then
         echo "rebuild: --bump-orb needs a local omarchnix checkout at $omarchnix" >&2
         exit 2
