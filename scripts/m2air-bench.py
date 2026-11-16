@@ -177,9 +177,16 @@ def sample_loop(name, duration, interval, until=None):
     with open(base + ".csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
+        stop = False
         while True:
-            time.sleep(interval)
+            try:
+                time.sleep(interval)
+            except KeyboardInterrupt:
+                # Ctrl+C ends the run early but keeps what was sampled.
+                stop = True
             now = time.monotonic()
+            if stop and now - t0 < 1:
+                break
             dt = now - t0
             cpu1, ctxt1 = cpu_times()
             idle1, irq1 = idle_times(), irq_counts()
@@ -228,12 +235,17 @@ def sample_loop(name, duration, interval, until=None):
                 f"P {row['deep_p_pct']:4.1f}%",
                 end="", file=sys.stderr, flush=True,
             )
+            if stop:
+                break
             if until is not None:
                 if until():
                     break
             elif now - start >= duration:
                 break
     print(file=sys.stderr)
+    if not rows:
+        os.remove(base + ".csv")
+        sys.exit(f"{name}: stopped before the first sample, nothing saved")
 
     elapsed = time.monotonic() - start
     procs1 = proc_times()
