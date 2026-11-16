@@ -88,6 +88,8 @@ in
         cm-super
         ;
     })
+    # PDF viewer, as in Omarchy's own defaults (its window rules already float it).
+    pkgs.evince
   ];
 
   programs.omarchnix = {
@@ -173,6 +175,8 @@ in
       "x-scheme-handler/about" = [ "helium.desktop" ];
       "x-scheme-handler/unknown" = [ "helium.desktop" ];
       "application/xhtml+xml" = [ "helium.desktop" ];
+      "application/pdf" = [ "org.gnome.Evince.desktop" ];
+      "application/epub+zip" = [ "org.gnome.Evince.desktop" ];
       "x-scheme-handler/antigravity" = [ "antigravity-hub.desktop" ];
       "x-scheme-handler/bitwarden" = [ "bitwarden.desktop" ];
       "x-scheme-handler/claude" = [ "com.anthropic.Claude.desktop" ];
