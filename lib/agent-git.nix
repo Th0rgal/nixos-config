@@ -1,4 +1,4 @@
-# Git identity for coding agents (Claude Code / Claude Desktop, OpenCode, Antigravity):
+# Git identity for coding agents (Claude Code / Claude Desktop, ChatGPT/Codex, OpenCode, Antigravity):
 # commits they make are authored and committed as the agent, never as Thomas, and
 # are signed like his own (programs.git.signing in home/profiles/core.nix; the agent
 # address is listed in allowed_signers for the same key).
