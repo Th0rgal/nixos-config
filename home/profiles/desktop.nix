@@ -91,7 +91,11 @@ in
   ];
 
   programs.omarchnix = {
-    cloudMounts.enable = true;
+    cloudMounts = {
+      enable = true;
+      # ~/Cloud/reMarkable: pair once with `remarkable setup`.
+      remarkable.enable = true;
+    };
     rbw.enable = true;
 
     agents = {
