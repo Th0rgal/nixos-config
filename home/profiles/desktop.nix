@@ -71,23 +71,20 @@ in
   # top of scheme-small: about 0.7 GiB of closure against 5 GiB+ for texliveFull.
   # Add a package here when a build stops on "File `x.sty' not found".
   home.packages = [
-    (pkgs.texlive.combine {
-      inherit (pkgs.texlive)
-        scheme-small
-        latexmk
-        cleveref
-        tcolorbox
-        environ
-        tikzfill
-        pdfcol
-        charter
-        titlesec
-        xltabular
-        ltablex
-        enumitem
-        cm-super
-        ;
-    })
+    (pkgs.texliveSmall.withPackages (ps: [
+      ps.latexmk
+      ps.cleveref
+      ps.tcolorbox
+      ps.environ
+      ps.tikzfill
+      ps.pdfcol
+      ps.charter
+      ps.titlesec
+      ps.xltabular
+      ps.ltablex
+      ps.enumitem
+      ps.cm-super
+    ]))
     # PDF viewer, as in Omarchy's own defaults (its window rules already float it).
     pkgs.evince
   ];
