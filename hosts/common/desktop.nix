@@ -1,4 +1,4 @@
-# Settings every one of Thomas's desktop hosts shares (m2air, spark, vm). Host files
+# Settings every one of Thomas's desktop hosts shares (m2air, vm). Host files
 # only add what differs: hardware, input devices, services and packages.
 # `omarchnix.profile` comes from the `platform` passed to `mkHost`.
 { inventory, lib, ... }:
