@@ -248,11 +248,11 @@
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1794841748,
-        "narHash": "sha256-AGQ7QXMOe9TZQNWWcANVQ6zZtn2uwqvdixX0FDgSqTM=",
+        "lastModified": 1794842841,
+        "narHash": "sha256-7WBvoQDM5sBX0SyW/Ggn4PCR3oJQN2vOUnykqJV23QI=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "9cdae7e7387d6ed83f625051ea2337cde3e7535f",
+        "rev": "27451225bdc9c209c731d370a78aa97d176ec5cc",
         "type": "github"
       },
       "original": {
@@ -388,11 +388,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1794785974,
-        "narHash": "sha256-E5uwGCb/CG3MMaG7wOGaL4i6QZppP0pME48UxCaI/HQ=",
+        "lastModified": 1794842755,
+        "narHash": "sha256-+BW4lev967WyyBW7lVkQBYYzfdUlLGamm9FUIJBpXUQ=",
         "owner": "Th0rgal",
         "repo": "orb",
-        "rev": "0cb4dea4e989e98ed10e73adea4a30e91e61d203",
+        "rev": "b32cddb3ec8e54508cd94cdb56e90215c2c8bad3",
         "type": "github"
       },
       "original": {

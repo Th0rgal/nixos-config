@@ -48,6 +48,8 @@ in
       touchpad = {
         naturalScroll = false;
         scrollFactor = 0.5;
+        # macOS default: pressing clicks, a light touch never does.
+        tapToClick = false;
       };
       murmure.enable = true;
       macos = {
