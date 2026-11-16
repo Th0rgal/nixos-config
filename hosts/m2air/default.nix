@@ -82,10 +82,11 @@ in
   # changes when the machine is reinstalled.
   system.stateVersion = "25.05";
 
-  # Proprietary desktop binaries (Antigravity, Claude Desktop, Widevine CDM);
+  # Proprietary desktop binaries (Antigravity, Claude Desktop, ChatGPT/Codex, Widevine CDM);
   # allow only those unfree packages rather than the whole unfree set.
   nixpkgs.config.allowUnfreePackages = [
     "antigravity-hub"
+    "chatgpt"
     "claude-desktop"
     "widevine-cdm"
   ];
@@ -112,6 +113,8 @@ in
     notion-calendar
     (agentGit.wrap antigravity-hub)
     (agentGit.wrap claude-desktop)
+    # ChatGPT desktop (official Linux build), which includes the Codex app.
+    (agentGit.wrap chatgpt)
   ];
 
   # Keep /nix/store, user profiles, and the 476 MiB /boot EFI partition lean automatically
