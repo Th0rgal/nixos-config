@@ -26,7 +26,7 @@ jobs:
       - name: Evaluate all hosts
         # The private inventory input is replaced by the same-shaped public stub.
         run: |
-          for host in m2air m2air-stock spark vm vm-x86_64; do
+          for host in m2air m2air-stock vm vm-x86_64; do
             echo "::group::$host"
             nix eval --raw --no-write-lock-file \
               --override-input inventory path:./ci/inventory-stub \

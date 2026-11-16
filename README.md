@@ -1,6 +1,6 @@
 # `Th0rgal/nixos-config`
 
-Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2air-aurora`, `m2air-stock`, `spark`) and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
+Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2air-aurora`, `m2air-stock`) and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
 
 ## Architecture
 
@@ -14,7 +14,6 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 
 - **`m2air`** (and alias **`m2air-aurora`**): MacBook Air M2 daily driver (`aarch64-linux`, Asahi Linux + removable ARM64 UEFI GRUB on `UUID=C650-1003` + LUKS2 `cryptroot` `UUID=aa0403dd-9917-49e1-85b1-46b21b39f2d9`), with `aurora-silicon/nixos-aurora` Secure Enclave, Touch ID (`fprintd`), FIDO2 (`aurora-fido`), and Orb Touch ID signer enabled.
 - **`m2air-stock`**: Fallback MacBook Air M2 target using stock `nixos-apple-silicon` without Stage-2 Aurora SEP.
-- **`spark`**: NVIDIA Grace / DGX Spark ARM64 workstation & server (`aarch64-linux`).
 - **`vm`** / **`vm-x86_64`**: Turnkey QEMU desktop virtual machines (`aarch64-linux` / `x86_64-linux`) running the exact same Omarchy + macOS-feel desktop, `starship-subtle` theme, and Space `1..8` wallpapers from `Th0rgal/wallpapers`.
 
 ## macOS-Style Shortcuts & Ergonomics (`Option` = `ALT` for WM & Spaces, `Cmd` = `SUPER` for Orb & Apps)

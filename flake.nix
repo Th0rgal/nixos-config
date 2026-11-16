@@ -1,10 +1,10 @@
 {
-  description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, spark, vm), built on Th0rgal/omarchnix";
+  description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, vm), built on Th0rgal/omarchnix";
 
   inputs = {
     # Note for Thomas: Nix flakes forbid `if builtins.pathExists ...` inside `inputs`
     # (and pure evaluation sandboxes paths outside `nixos-config/`), so this stays pointed
-    # at GitHub for portability across `spark`, VMs, and CI. On machines where
+    # at GitHub for portability across VMs and CI. On machines where
     # `/home/thomas/work/nixos/omarchnix/flake.nix` exists locally, our `nixos-rebuild`
     # and `nh` wrappers (`hosts/common/thomas-user.nix`) automatically inject
     # `--override-input omarchnix path:/home/thomas/work/nixos/omarchnix --no-write-lock-file`.
@@ -95,14 +95,6 @@
           platform = "m2air-asahi";
           modules = [
             ./hosts/m2air
-          ];
-        };
-
-        # NVIDIA Grace / DGX Spark ARM64 workstation & server
-        spark = mkPersonalHost {
-          platform = "spark";
-          modules = [
-            ./hosts/spark
           ];
         };
 
