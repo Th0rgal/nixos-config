@@ -96,6 +96,9 @@ in
       remarkable.enable = true;
     };
     rbw.enable = true;
+    # The LG's EDID reports a wide gamut, so Omarchy colour-converts to it; at
+    # 8 bits that warns (and can band). The Asahi DCP drives it at 10-bit fine.
+    monitorBitdepth."desc:LG Electronics LG HDR 4K" = 10;
 
     agents = {
       # Skills are managed centrally via `th0rgal/orb-library` (`.orb-lib.lock`),
