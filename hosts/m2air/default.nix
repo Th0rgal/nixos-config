@@ -88,7 +88,9 @@ in
   # allow only those unfree packages rather than the whole unfree set.
   nixpkgs.config.allowUnfreePackages = [
     "antigravity-hub"
+    "antigravity-cli"
     "chatgpt"
+    "claude-code"
     "claude-desktop"
     "widevine-cdm"
   ];
@@ -114,9 +116,12 @@ in
     folio-desktop
     notion-calendar
     (agentGit.wrap antigravity-hub)
+    (agentGit.wrap antigravity-cli)
+    (agentGit.wrap claude-code)
     (agentGit.wrap claude-desktop)
     # ChatGPT desktop (official Linux build), which includes the Codex app.
     (agentGit.wrap chatgpt)
+    (agentGit.wrap codex)
   ];
 
   # Keep /nix/store, user profiles, and the 476 MiB /boot EFI partition lean automatically
