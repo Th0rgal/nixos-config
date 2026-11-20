@@ -111,6 +111,11 @@ in
     };
   };
 
+  # Preserve every local edit, including repeated Hyprland configuration trials.
+  home-manager.backupCommand = pkgs.writeShellScript "m2air-home-backup" ''
+    exec ${pkgs.coreutils}/bin/mv --backup=numbered --no-target-directory -- "$1" "$1.hm-bak"
+  '';
+
   home-manager.users.${user.username} = {
     xdg.dataFile."applications/cursor.desktop".source =
       let
