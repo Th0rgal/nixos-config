@@ -249,11 +249,11 @@
       },
       "locked": {
         "lastModified": 1795188113,
+        "narHash": "sha256-//XoXP9wcLF2mqoG1aM36/A5x17unvxRoTqwyG+Gwuk=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
         "rev": "ab5c0c2bf3c7c8c0824e05a003ed32b50bb5de02",
-        "type": "github",
-        "narHash": "sha256-//XoXP9wcLF2mqoG1aM36/A5x17unvxRoTqwyG+Gwuk="
+        "type": "github"
       },
       "original": {
         "owner": "Th0rgal",
@@ -389,12 +389,9 @@
       },
       "locked": {
         "lastModified": 1795187711,
-        "narHash": "sha256-+Tzar0VatWg3FIBHtK7gTt2UEDS/EhcFgXel7QfX1M8=",
-        "ref": "codex/leanui-desktop-trial",
-        "rev": "0d48ffcc526405b3dd3b5db4d6bebb4031f4814a",
-        "shallow": true,
-        "type": "git",
-        "url": "https://github.com/Th0rgal/orb"
+        "narHash": "sha256-MbtwmKPpBKGi6Hawv9+cN7ypyHp5x3gQrKiKNL4ERIQ=",
+        "type": "tarball",
+        "url": "https://codeload.github.com/Th0rgal/orb/tar.gz/0d48ffcc526405b3dd3b5db4d6bebb4031f4814a"
       },
       "original": {
         "owner": "Th0rgal",
