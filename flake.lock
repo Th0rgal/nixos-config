@@ -390,10 +390,11 @@
       "locked": {
         "lastModified": 1795187711,
         "narHash": "sha256-+Tzar0VatWg3FIBHtK7gTt2UEDS/EhcFgXel7QfX1M8=",
-        "owner": "Th0rgal",
-        "repo": "orb",
+        "ref": "codex/leanui-desktop-trial",
         "rev": "0d48ffcc526405b3dd3b5db4d6bebb4031f4814a",
-        "type": "github"
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/Th0rgal/orb"
       },
       "original": {
         "owner": "Th0rgal",
