@@ -92,6 +92,7 @@ in
     "chatgpt"
     "claude-code"
     "claude-desktop"
+    "cursor"
     "widevine-cdm"
   ];
 
@@ -101,6 +102,7 @@ in
     android-tools
     helium
     bitwarden-desktop
+    code-cursor
     telegram-desktop
     signal-desktop-frameless
     vesktop
