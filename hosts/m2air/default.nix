@@ -9,6 +9,40 @@
 let
   inherit (inventory) user;
   secretPath = config.thomas.secrets.path;
+  # Cursor writes JSON with comments, including its per-install crash reporter ID.
+  jsoncParser = pkgs.fetchzip {
+    url = "https://registry.npmjs.org/jsonc-parser/-/jsonc-parser-3.3.1.tgz";
+    hash = "sha256-eZb4Epz0UsTTaSstqBl46Sy/KRyKaJ+vBUJ92/6wsZY=";
+  };
+  configureCursorKeyring = pkgs.writeText "cursor-keyring.cjs" ''
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { randomUUID } = require("node:crypto");
+    const jsonc = require("${jsoncParser}");
+    const dir = path.join(process.env.HOME, ".cursor");
+    const file = path.join(dir, "argv.json");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const exists = fs.existsSync(file);
+    const source = exists ? fs.readFileSync(file, "utf8") : "{}\n";
+    const errors = [];
+    const current = jsonc.parse(source, errors, { allowTrailingComma: true });
+    if (errors.length || !current || typeof current !== "object" || Array.isArray(current)) {
+      console.error("Cursor keyring setting skipped: argv.json is not a valid JSONC object.");
+    } else if (current["password-store"] !== "gnome-libsecret") {
+      const edits = jsonc.modify(source, ["password-store"], "gnome-libsecret", {
+        formattingOptions: { insertSpaces: false, tabSize: 4, eol: source.includes("\r\n") ? "\r\n" : "\n" }
+      });
+      const tmp = file + "." + randomUUID();
+      try {
+        fs.writeFileSync(tmp, jsonc.applyEdits(source, edits), {
+          flag: "wx", mode: exists ? fs.statSync(file).mode & 0o777 : 0o600
+        });
+        fs.renameSync(tmp, file);
+      } finally {
+        fs.rmSync(tmp, { force: true });
+      }
+    }
+  '';
   agentGit = import ../../lib/agent-git.nix {
     inherit pkgs;
     inherit (user) agent;
@@ -77,8 +111,39 @@ in
     };
   };
 
-  # First-install release of this user's home state; never bump it to "upgrade".
-  home-manager.users.${user.username}.home.stateVersion = "25.05";
+  home-manager.users.${user.username} = {
+    xdg.dataFile."applications/cursor.desktop".source =
+      let
+        cursorRoot = "${config.users.users.${user.username}.home}/work/nixos/cursor";
+        launchCursor = pkgs.writeShellScript "launch-cursor" ''
+          if [ -x "${cursorRoot}/bin/cursor" ]; then
+            exec "${cursorRoot}/bin/cursor" "$@"
+          fi
+          exec ${pkgs.code-cursor}/bin/cursor "$@"
+        '';
+        launcher = pkgs.makeDesktopItem {
+          name = "cursor";
+          desktopName = "Cursor";
+          genericName = "Code Editor";
+          exec = "${launchCursor} %F";
+          icon = "${pkgs.code-cursor}/share/pixmaps/cursor.png";
+          categories = [
+            "Development"
+            "IDE"
+          ];
+          startupWMClass = "cursor";
+        };
+      in
+      "${launcher}/share/applications/cursor.desktop";
+    home.activation.cursorKeyring =
+      config.home-manager.users.${user.username}.lib.dag.entryAfter [ "writeBoundary" ]
+        ''
+          run ${pkgs.nodejs}/bin/node ${configureCursorKeyring}
+        '';
+    programs.omarchnix.sharing.kdeconnect.androidMirroring.enable = true;
+    # First-install release of this user's home state; never bump it to "upgrade".
+    home.stateVersion = "25.05";
+  };
 
   # First-install release of this host's state. Never bump it to "upgrade"; it only
   # changes when the machine is reinstalled.
