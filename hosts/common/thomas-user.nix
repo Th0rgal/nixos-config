@@ -62,13 +62,15 @@ let
       if [ "$locked" = 0 ] && [ -f "$omarchnix/flake.nix" ]; then
         if [ "$bump_orb" = 1 ]; then
           echo "rebuild: moving omarchnix's orb input to master" >&2
-          nix flake update orb --flake "$omarchnix"
+          nix flake update --refresh orb --flake "$omarchnix"
         fi
         echo "rebuild: using local omarchnix at $omarchnix ($(git -C "$omarchnix" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$omarchnix" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
         overrides=(--override-input omarchnix "path:$omarchnix" --no-write-lock-file)
         if [ "$bump_orb" = 0 ]; then
-          echo "rebuild: using the latest Orb master (rebuild --locked builds the pinned one)" >&2
-          overrides+=(--override-input omarchnix/orb github:Th0rgal/orb)
+          orb_ref=$(git ls-remote --exit-code https://github.com/Th0rgal/orb.git refs/heads/master)
+          read -r orb_rev _ <<<"$orb_ref"
+          echo "rebuild: using Orb master at $orb_rev (rebuild --locked builds the pinned one)" >&2
+          overrides+=(--override-input omarchnix/orb "github:Th0rgal/orb/$orb_rev")
         fi
       elif [ "$bump_orb" = 1 ]; then
         echo "rebuild: --bump-orb needs a local omarchnix checkout at $omarchnix" >&2
