@@ -1,6 +1,6 @@
 # NixOS & Omarchnix Workspace (`/home/thomas/work/nixos`)
 
-This workspace contains the complete declarative configuration for Thomas's Apple Silicon MacBook Air M2 (`m2air`, `aarch64-linux`), NVIDIA Grace workstation (`spark`), and turnkey QEMU desktop VMs (`vm`, `vm-x86_64`) running NixOS + Omarchy (`omarchnix`).
+Thomas deploys NixOS on the Apple Silicon MacBook Air M2 (`m2air`). The ARM QEMU guest (`vm`) and x86 cloud guest (`vm-x86_64`) exercise the shared desktop for screenshots and agent testing. The DGX Spark runs Ubuntu and serves as a remote Nix builder.
 
 ---
 
@@ -12,7 +12,7 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 ├── AGENTS.md                  # Full context & operational instructions for AI coding agents
 ├── CLAUDE.md -> AGENTS.md     # Symlink for Claude Code / OpenCode
 ├── nixos-config/              # Personal NixOS & Home Manager flake (github.com/Th0rgal/nixos-config)
-│   ├── flake.nix              # Thin flake entry point via omarchnix.lib.mkHost (m2air, spark, vm, vm-x86_64)
+│   ├── flake.nix              # Thin flake entry point via omarchnix.lib.mkHost (m2air variants, vm, vm-x86_64)
 │   ├── flake.lock             # Pins omarchnix, folio, and Th0rgal/wallpapers
 │   ├── inventory/
 │   │   ├── user.nix           # User identity, email, SSH public keys, World Clock cities
@@ -25,8 +25,6 @@ This workspace contains the complete declarative configuration for Thomas's Appl
 │   │   │   ├── default.nix    # Personal m2air NixOS config (Aurora Touch ID, 90% charge cap, desktop apps)
 │   │   │   ├── hardware.nix   # Partition UUIDs, GRUB (5 generations) & /boot space pre-switch check
 │   │   │   └── secrets.nix    # sops-nix: builder key, Nix signing key, restic password
-│   │   ├── spark/
-│   │   │   └── default.nix    # ARM64 workstation config (evaluated in CI; the real spark runs Ubuntu)
 │   │   └── vm/
 │   │       └── default.nix    # Turnkey QEMU desktop VM with auto-login & wallpapers
 │   └── home/
@@ -51,7 +49,6 @@ This workspace contains the complete declarative configuration for Thomas's Appl
     ├── modules/
     │   ├── omarchnix.nix      # System-level NixOS module (`omarchnix.*` + `omarchnix.desktop.macos.*`)
     │   ├── hardware-m2air.nix # Reusable Apple Silicon MacBook Air M2 hardware module
-    │   ├── hardware-spark.nix # Reusable NVIDIA Grace / DGX Spark hardware module
     │   ├── pam-fido.nix       # PAM U2F/FIDO2 biometric module
     │   └── pam-touchid.nix    # PAM fprintd Touch ID module
     ├── home/

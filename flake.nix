@@ -1,5 +1,5 @@
 {
-  description = "Thomas's personal NixOS & Home Manager configurations (m2air, m2air-aurora, vm), built on Th0rgal/omarchnix";
+  description = "Thomas's personal NixOS & Home Manager configurations for the MacBook Air M2 and ARM/x86 QEMU test guests, built on Th0rgal/omarchnix";
 
   inputs = {
     # Note for Thomas: Nix flakes forbid `if builtins.pathExists ...` inside `inputs`
@@ -74,6 +74,14 @@
           }
         );
 
+      mkTestVM =
+        system:
+        mkPersonalHost {
+          inherit system;
+          platform = "vm";
+          modules = [ ./hosts/vm ];
+        };
+
       m2air = mkPersonalHost {
         platform = "m2air-aurora";
         modules = [
@@ -98,23 +106,9 @@
           ];
         };
 
-        # Turnkey desktop VM (`aarch64-linux` / Apple Silicon QEMU or cloud VM) with preloaded Th0rgal/wallpapers
-        vm = mkPersonalHost {
-          platform = "vm";
-          system = "aarch64-linux";
-          modules = [
-            ./hosts/vm
-          ];
-        };
-
-        # Turnkey desktop VM (`x86_64-linux` QEMU or cloud VM) with preloaded Th0rgal/wallpapers
-        vm-x86_64 = mkPersonalHost {
-          platform = "vm";
-          system = "x86_64-linux";
-          modules = [
-            ./hosts/vm
-          ];
-        };
+        # The same screenshot desktop on the Mac's architecture and on x86 cloud workers.
+        vm = mkTestVM "aarch64-linux";
+        vm-x86_64 = mkTestVM "x86_64-linux";
       };
 
       formatter = forAllSystems (
