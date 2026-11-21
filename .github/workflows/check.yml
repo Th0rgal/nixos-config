@@ -33,12 +33,16 @@ jobs:
         # The private inventory input is replaced by the same-shaped public stub.
         run: |
           for host in ${{ matrix.hosts }}; do
-            echo "::group::$host"
-            nix eval --raw --no-write-lock-file \
-              --override-input inventory path:./ci/inventory-stub \
-              ".#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
-            echo
-            echo "::endgroup::"
+            targets=(toplevel)
+            case "$host" in vm|vm-x86_64) targets+=(vm) ;; esac
+            for target in "${targets[@]}"; do
+              echo "::group::$host ($target)"
+              nix eval --raw --no-write-lock-file \
+                --override-input inventory path:./ci/inventory-stub \
+                ".#nixosConfigurations.$host.config.system.build.$target.drvPath"
+              echo
+              echo "::endgroup::"
+            done
           done
 
   lint:

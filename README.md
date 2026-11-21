@@ -1,13 +1,13 @@
 # `Th0rgal/nixos-config`
 
-Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2air-aurora`, `m2air-stock`) and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
+Personal NixOS & Home Manager configurations for Thomas's MacBook Air M2 (`m2air`, `m2air-aurora`, `m2air-stock`) and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
 
 ## Architecture
 
 | Repository | Purpose | What Lives There |
 | :--- | :--- | :--- |
-| **[`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix)** | Reusable public distribution, installer & macOS-feel suite | `lib.mkHost` host constructor, `overlays/default.nix`, `nixosModules.{omarchnix,hardware-m2air,hardware-spark}`, `homeManagerModules.omarchnix`, `home/macos.nix` (`mission-control`, `macos-dock`, `spotlight`, `touchid`, `workspace-wallpapers`, `workspaces`), `omarchy-shell`, 23+ themes, Apple Silicon Asahi/Aurora SEP modules, and CI gate tests. |
-| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,fleet,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,spark,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode,cloud-mounts}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
+| **[`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix)** | Reusable public distribution, installer & macOS-feel suite | `lib.mkHost` host constructor, `overlays/default.nix`, `nixosModules.omarchnix`, `homeManagerModules.omarchnix`, `home/macos.nix` (`mission-control`, `macos-dock`, `spotlight`, `touchid`, `workspace-wallpapers`, `workspaces`), `omarchy-shell`, 23+ themes, Apple Silicon Asahi/Aurora SEP modules, and CI gate tests. |
+| **[`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config)** | Personal machine inventory, user identity & profiles | Pure data inventory (`inventory/{user,wallpapers}.nix`), host hardware/roles (`hosts/{common,m2air,vm}`), reusable Home Manager modules (`home/modules/{ssh-config,agent-shims,opencode,cloud-mounts}.nix`), and layered user profiles (`home/profiles/{core,desktop}.nix`). |
 | **[`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers)** | Declarative WebP desktop & Space wallpapers | The 8 per-Space WebP wallpapers (`singapore.webp`, `bologna-dome.webp`, etc.) pinned in `flake.lock` so physical hosts and ephemeral VMs boot with identical Space backgrounds out of the box. |
 
 ## Hosts
@@ -15,6 +15,25 @@ Personal NixOS & Home Manager configurations for Thomas's machines (`m2air`, `m2
 - **`m2air`** (and alias **`m2air-aurora`**): MacBook Air M2 daily driver (`aarch64-linux`, Asahi Linux + removable ARM64 UEFI GRUB on `UUID=C650-1003` + LUKS2 `cryptroot` `UUID=aa0403dd-9917-49e1-85b1-46b21b39f2d9`), with `aurora-silicon/nixos-aurora` Secure Enclave, Touch ID (`fprintd`), FIDO2 (`aurora-fido`), and Orb Touch ID signer enabled.
 - **`m2air-stock`**: Fallback MacBook Air M2 target using stock `nixos-apple-silicon` without Stage-2 Aurora SEP.
 - **`vm`** / **`vm-x86_64`**: Turnkey QEMU desktop virtual machines (`aarch64-linux` / `x86_64-linux`) running the exact same Omarchy + macOS-feel desktop, `starship-subtle` theme, and Space `1..8` wallpapers from `Th0rgal/wallpapers`.
+
+The DGX Spark runs Ubuntu and builds ARM packages remotely for the MacBook. Both VM targets use the shared desktop for screenshots. On an x86 Linux cloud worker with Nix and flakes enabled, build the QEMU launcher from the root of this checkout using the public CI inventory.
+
+```sh
+nix build --max-jobs 2 --cores 3 --no-write-lock-file --override-input inventory "path:$PWD/ci/inventory-stub" \
+  '.#nixosConfigurations.vm-x86_64.config.system.build.vm'
+./result/bin/run-omarchnix-vm-vm -display none -vga std -vnc 127.0.0.1:1
+```
+
+The launcher runs the desktop in a guest and exposes its screen on loopback port 5901. Agents editing a sibling Omarchnix checkout can add `--override-input omarchnix "path:$(realpath ../omarchnix)"` to the build command.
+
+For a quick desktop check, build one generated file. For example, inspect the Hyprland screen-sharing settings as follows.
+
+```sh
+nix build --out-link result-xdph --no-write-lock-file \
+  --override-input inventory "path:$PWD/ci/inventory-stub" \
+  '.#nixosConfigurations.vm-x86_64.config.home-manager.users.thomas.xdg.configFile."hypr/xdph.conf".source'
+cat result-xdph
+```
 
 ## macOS-Style Shortcuts & Ergonomics (`Option` = `ALT` for WM & Spaces, `Cmd` = `SUPER` for Orb & Apps)
 
