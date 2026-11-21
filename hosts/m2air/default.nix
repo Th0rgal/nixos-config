@@ -8,6 +8,7 @@
 }:
 let
   inherit (inventory) user;
+  rencal = pkgs.callPackage ../../pkgs/rencal.nix { };
   secretPath = config.thomas.secrets.path;
   # Cursor writes JSON with comments, including its per-install crash reporter ID.
   jsoncParser = pkgs.fetchzip {
@@ -180,6 +181,9 @@ in
 
   programs.firefox.enable = true;
 
+  systemd.packages = [ rencal ];
+  systemd.user.services.rencal-notifierd.wantedBy = [ "graphical-session.target" ];
+
   environment.systemPackages = with pkgs; [
     android-tools
     helium
@@ -198,7 +202,7 @@ in
     murmure
     orb-desktop
     folio-desktop
-    notion-calendar
+    rencal
     (agentGit.wrap antigravity-hub)
     (agentGit.wrap antigravityCli)
     (agentGit.wrap claude-code)
