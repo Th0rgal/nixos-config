@@ -37,7 +37,6 @@ let
       bump_orb=0
       host=""
       extra=()
-      nh_flags=()
 
       usage() {
         sed -n 's/^  #   //p' "$0" 2>/dev/null || true
@@ -47,7 +46,7 @@ let
       while [ $# -gt 0 ]; do
         case "$1" in
           switch|boot|test|build|build-vm) verb="$1" ;;
-          dry) verb=build; nh_flags+=(--dry) ;;
+          dry) verb=dry ;;
           --host) host="$2"; shift ;;
           --locked) locked=1 ;;
           --bump-orb) bump_orb=1 ;;
@@ -77,7 +76,11 @@ let
         exit 2
       fi
 
-      args=(os "$verb" "$flake" "''${nh_flags[@]}")
+      if [ "$verb" = dry ]; then
+        if [ -z "$host" ]; then read -r host </proc/sys/kernel/hostname; fi
+        exec nix build --dry-run --no-link "$flake#nixosConfigurations.$host.config.system.build.toplevel" "''${overrides[@]}" "''${extra[@]}"
+      fi
+      args=(os "$verb" "$flake")
       [ -n "$host" ] && args+=(--hostname "$host")
       exec nh "''${args[@]}" -- "''${overrides[@]}" "''${extra[@]}"
     '';
