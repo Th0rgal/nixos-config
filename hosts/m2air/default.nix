@@ -43,6 +43,18 @@ let
       }
     }
   '';
+  # The native Carbon and Neon selectors require a newer CLI than this nixpkgs pin.
+  antigravityCli =
+    if lib.versionAtLeast pkgs.antigravity-cli.version "1.5.13" then
+      pkgs.antigravity-cli
+    else
+      pkgs.antigravity-cli.overrideAttrs {
+        version = "1.5.13";
+        src = pkgs.fetchurl {
+          url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.13-5999302598852608/linux-arm/cli_linux_arm64.tar.gz";
+          hash = "sha512-3M6i60VQmfUXXwyHzEezj87+TLDLRN6jknRpu0u/aKw8CzD8BK/7JMF+kJWThqk8N4Xo5LixozOMpOTVe4AFew==";
+        };
+      };
   agentGit = import ../../lib/agent-git.nix {
     inherit pkgs;
     inherit (user) agent;
@@ -188,7 +200,7 @@ in
     folio-desktop
     notion-calendar
     (agentGit.wrap antigravity-hub)
-    (agentGit.wrap antigravity-cli)
+    (agentGit.wrap antigravityCli)
     (agentGit.wrap claude-code)
     (agentGit.wrap claude-desktop)
     # ChatGPT desktop (official Linux build), which includes the Codex app.
