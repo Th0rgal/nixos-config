@@ -37,7 +37,6 @@ let
       bump_orb=0
       host=""
       extra=()
-      nh_flags=()
 
       usage() {
         sed -n 's/^  #   //p' "$0" 2>/dev/null || true
@@ -47,7 +46,7 @@ let
       while [ $# -gt 0 ]; do
         case "$1" in
           switch|boot|test|build|build-vm) verb="$1" ;;
-          dry) verb=build; nh_flags+=(--dry) ;;
+          dry) verb=dry ;;
           --host) host="$2"; shift ;;
           --locked) locked=1 ;;
           --bump-orb) bump_orb=1 ;;
@@ -62,20 +61,26 @@ let
       if [ "$locked" = 0 ] && [ -f "$omarchnix/flake.nix" ]; then
         if [ "$bump_orb" = 1 ]; then
           echo "rebuild: moving omarchnix's orb input to master" >&2
-          nix flake update orb --flake "$omarchnix"
+          nix flake update --refresh orb --flake "$omarchnix"
         fi
         echo "rebuild: using local omarchnix at $omarchnix ($(git -C "$omarchnix" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$omarchnix" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
         overrides=(--override-input omarchnix "path:$omarchnix" --no-write-lock-file)
         if [ "$bump_orb" = 0 ]; then
-          echo "rebuild: using the latest Orb master (rebuild --locked builds the pinned one)" >&2
-          overrides+=(--override-input omarchnix/orb github:Th0rgal/orb)
+          orb_ref=$(git ls-remote --exit-code https://github.com/Th0rgal/orb.git refs/heads/master)
+          read -r orb_rev _ <<<"$orb_ref"
+          echo "rebuild: using Orb master at $orb_rev (rebuild --locked builds the pinned one)" >&2
+          overrides+=(--override-input omarchnix/orb "github:Th0rgal/orb/$orb_rev")
         fi
       elif [ "$bump_orb" = 1 ]; then
         echo "rebuild: --bump-orb needs a local omarchnix checkout at $omarchnix" >&2
         exit 2
       fi
 
-      args=(os "$verb" "$flake" "''${nh_flags[@]}")
+      if [ "$verb" = dry ]; then
+        if [ -z "$host" ]; then read -r host </proc/sys/kernel/hostname; fi
+        exec nix build --dry-run --no-link "$flake#nixosConfigurations.$host.config.system.build.toplevel" "''${overrides[@]}" "''${extra[@]}"
+      fi
+      args=(os "$verb" "$flake")
       [ -n "$host" ] && args+=(--hostname "$host")
       exec nh "''${args[@]}" -- "''${overrides[@]}" "''${extra[@]}"
     '';
