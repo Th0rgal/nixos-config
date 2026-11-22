@@ -188,7 +188,7 @@ in
     android-tools
     helium
     bitwarden-desktop
-    code-cursor
+    (callPackage ../../pkgs/cursor-system.nix { })
     telegram-desktop
     signal-desktop-frameless
     vesktop
