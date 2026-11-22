@@ -292,7 +292,11 @@ in
         name = "rabby-extension-dialog";
         match.class = "^chrome-acmacodkjbdgmoleebolmdjonilkdbch-.*$";
         float = true;
-        center = true;
+        move = [
+          "(monitor_w-window_w-24)"
+          "72"
+        ];
+        size = "400 660";
         stay_focused = true;
         no_blur = true;
         rounding = 0;
