@@ -665,8 +665,8 @@ if command -v omarchy-launch-shell >/dev/null 2>&1; then
     nohup omarchy-launch-shell >"${XDG_RUNTIME_DIR}/omarchy-shell.log" 2>&1 </dev/null &
 fi
 
-# Launch wallpaper via swaybg.
-if command -v swaybg >/dev/null 2>&1; then
+# Launch wallpaper via swaybg ONLY if the per-Space workspace-wallpapers plugin is not installed.
+if [ ! -f "${HOME}/.config/omarchy/workspace-wallpapers.json" ] && command -v swaybg >/dev/null 2>&1; then
     WP=""
     for candidate in \
         "${HOME}/.config/omarchy/current/background" \
