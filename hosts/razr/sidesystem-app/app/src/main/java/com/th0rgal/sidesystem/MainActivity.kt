@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
 
                 var status by remember { mutableStateOf(SideSystemStatus()) }
                 var telemetryHistory by remember { mutableStateOf<List<TelemetrySample>>(emptyList()) }
+                var telemetryIntervalMs by remember { mutableStateOf(2_500L) }
+                var telemetryPaused by remember { mutableStateOf(false) }
                 var peripherals by remember { mutableStateOf<List<PeripheralDevice>>(emptyList()) }
                 var hasBtPerm by remember {
                     mutableStateOf(SideSystemCtl.hasBluetoothPermission(context))
@@ -80,10 +82,12 @@ class MainActivity : ComponentActivity() {
                         peripherals = SideSystemCtl.queryPeripherals(context)
                         val next = SideSystemCtl.fetchStatus(context)
                         status = next
-                        telemetryHistory = if (next.containerRunning) {
-                            (telemetryHistory + TelemetrySample(next.cpuPct, next.memPct)).takeLast(36)
-                        } else {
-                            emptyList()
+                        if (!telemetryPaused) {
+                            telemetryHistory = if (next.containerRunning) {
+                                (telemetryHistory + TelemetrySample(next.cpuPct, next.memPct)).takeLast(60)
+                            } else {
+                                emptyList()
+                            }
                         }
                     } finally {
                         if (showSpinner) isRefreshing = false
@@ -139,12 +143,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Poll live telemetry every 2.5s while running (5s when stopped)
-                LaunchedEffect(lifecycleOwner) {
+                // Poll live telemetry at selected interval while running (5s when stopped)
+                LaunchedEffect(lifecycleOwner, telemetryIntervalMs, telemetryPaused) {
                     lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                         while (isActive) {
-                            refreshAll(showSpinner = false)
-                            delay(if (status.containerRunning) 2_500L else 5_000L)
+                            if (!telemetryPaused) {
+                                refreshAll(showSpinner = false)
+                            }
+                            delay(if (status.containerRunning) telemetryIntervalMs else 5_000L)
                         }
                     }
                 }
@@ -312,6 +318,10 @@ class MainActivity : ComponentActivity() {
                 DashboardScreen(
                     status = status,
                     telemetryHistory = telemetryHistory,
+                    telemetryIntervalMs = telemetryIntervalMs,
+                    telemetryPaused = telemetryPaused,
+                    onTelemetryIntervalChange = { telemetryIntervalMs = it },
+                    onToggleTelemetryPaused = { telemetryPaused = !telemetryPaused },
                     peripherals = peripherals,
                     hasBluetoothPermission = hasBtPerm,
                     isRefreshing = isRefreshing,

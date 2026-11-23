@@ -1,6 +1,8 @@
 package com.th0rgal.sidesystem
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -44,6 +46,8 @@ import androidx.compose.material.icons.rounded.DevicesOther
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mouse
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -134,6 +138,10 @@ data class DashboardCallbacks(
 fun DashboardScreen(
     status: SideSystemStatus,
     telemetryHistory: List<TelemetrySample>,
+    telemetryIntervalMs: Long,
+    telemetryPaused: Boolean,
+    onTelemetryIntervalChange: (Long) -> Unit,
+    onToggleTelemetryPaused: () -> Unit,
     peripherals: List<PeripheralDevice>,
     hasBluetoothPermission: Boolean,
     isRefreshing: Boolean,
@@ -147,6 +155,7 @@ fun DashboardScreen(
     var selectedResolution by remember { mutableStateOf(status.resolution) }
     var selectedScale by remember { mutableStateOf(status.scale) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showTelemetryExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(status.resolution, status.scale) {
         selectedResolution = status.resolution
@@ -191,8 +200,11 @@ fun DashboardScreen(
             val cutoutEnd = cutoutPadding.calculateEndPadding(layoutDirection)
 
             val isWideScreen = maxWidth >= 640.dp
+            // Razr 60 Ultra full-bleed cover display is 480dp x 565dp (1080x1272 @ 360dpi)
+            // with twin cameras occupying the bottom-right 220dp x 155dp corner.
             val isCoverScreen = !isWideScreen &&
-                (maxHeight < 520.dp || maxWidth < 380.dp || cutoutBottom > 0.dp)
+                (maxHeight < 620.dp || maxWidth < 380.dp || cutoutBottom > 0.dp)
+            val cameraSafeEndPadding = max(230.dp, cutoutEnd + 14.dp)
 
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
@@ -210,6 +222,7 @@ fun DashboardScreen(
                         selectedScale = selectedScale,
                         onResolutionChange = { selectedResolution = it },
                         onScaleChange = { selectedScale = it },
+                        onExpandTelemetry = { showTelemetryExpanded = true },
                         callbacks = callbacks
                     )
                 } else {
@@ -218,11 +231,30 @@ fun DashboardScreen(
                         telemetryHistory = telemetryHistory,
                         busyAction = busyAction,
                         isCoverScreen = isCoverScreen,
-                        cameraSafeEndPadding = max(156.dp, cutoutEnd + 12.dp),
+                        cameraSafeEndPadding = cameraSafeEndPadding,
                         onOpenSettings = { showSettingsSheet = true },
+                        onExpandTelemetry = { showTelemetryExpanded = true },
                         callbacks = callbacks
                     )
                 }
+            }
+
+            AnimatedVisibility(
+                visible = showTelemetryExpanded && status.containerRunning,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                TelemetryExpandedOverlay(
+                    status = status,
+                    history = telemetryHistory,
+                    intervalMs = telemetryIntervalMs,
+                    paused = telemetryPaused,
+                    isCoverScreen = isCoverScreen,
+                    cameraSafeEndPadding = cameraSafeEndPadding,
+                    onIntervalChange = onTelemetryIntervalChange,
+                    onTogglePaused = onToggleTelemetryPaused,
+                    onDismiss = { showTelemetryExpanded = false }
+                )
             }
 
             if (showSettingsSheet && !isWideScreen) {
@@ -261,6 +293,7 @@ private fun PhoneAndCoverLayout(
     isCoverScreen: Boolean,
     cameraSafeEndPadding: Dp,
     onOpenSettings: () -> Unit,
+    onExpandTelemetry: () -> Unit,
     callbacks: DashboardCallbacks
 ) {
     val horizontalPad = if (isCoverScreen) 14.dp else 20.dp
@@ -318,7 +351,8 @@ private fun PhoneAndCoverLayout(
                         TelemetryGraphCard(
                             status = status,
                             history = telemetryHistory,
-                            compact = isCoverScreen
+                            compact = isCoverScreen,
+                            onClick = onExpandTelemetry
                         )
                     }
                 }
@@ -366,6 +400,7 @@ private fun WideMiracastLayout(
     selectedScale: DisplayScale,
     onResolutionChange: (DisplayResolution) -> Unit,
     onScaleChange: (DisplayScale) -> Unit,
+    onExpandTelemetry: () -> Unit,
     callbacks: DashboardCallbacks
 ) {
     Column(
@@ -423,7 +458,8 @@ private fun WideMiracastLayout(
                             TelemetryGraphCard(
                                 status = status,
                                 history = telemetryHistory,
-                                compact = false
+                                compact = false,
+                                onClick = onExpandTelemetry
                             )
                         }
                     }
@@ -1594,10 +1630,11 @@ private fun TelemetryGraphCard(
     status: SideSystemStatus,
     history: List<TelemetrySample>,
     compact: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val samples = remember(history, status.cpuPct, status.memPct) {
-        if (history.isNotEmpty()) history
+        if (history.isNotEmpty()) history.takeLast(36)
         else listOf(TelemetrySample(status.cpuPct, status.memPct))
     }
     val ramReadout = if (compact || status.memTotalMb <= 0) {
@@ -1607,12 +1644,16 @@ private fun TelemetryGraphCard(
         val totalGb = String.format(Locale.US, "%.0f", status.memTotalMb / 1024.0)
         "$usedGb/$totalGb GB · ${status.memPct}%"
     }
+    val shape = RoundedCornerShape(if (compact) 12.dp else 14.dp)
 
     Surface(
         color = OrbSurface,
-        shape = RoundedCornerShape(if (compact) 12.dp else 14.dp),
+        shape = shape,
         border = BorderStroke(1.dp, OrbBorder),
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(onClick = onClick)
     ) {
         Column(
             modifier = Modifier
@@ -1682,6 +1723,13 @@ private fun TelemetryGraphCard(
                             fontSize = if (compact) 11.sp else 12.sp
                         ),
                         color = OrbFgStrong
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.OpenInFull,
+                        contentDescription = "Expand resources graph",
+                        tint = OrbFgSubtle,
+                        modifier = Modifier.size(if (compact) 11.dp else 12.dp)
                     )
                 }
             }
@@ -1800,4 +1848,440 @@ private fun DrawScope.drawSmoothAreaSeries(
         radius = 2.75.dp.toPx(),
         center = tip
     )
+}
+
+private enum class TelemetrySeriesFilter(val label: String) {
+    ALL("All"),
+    CPU("CPU"),
+    RAM("RAM")
+}
+
+@Composable
+private fun TelemetryExpandedOverlay(
+    status: SideSystemStatus,
+    history: List<TelemetrySample>,
+    intervalMs: Long,
+    paused: Boolean,
+    isCoverScreen: Boolean,
+    cameraSafeEndPadding: Dp,
+    onIntervalChange: (Long) -> Unit,
+    onTogglePaused: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var seriesFilter by remember { mutableStateOf(TelemetrySeriesFilter.ALL) }
+    var showControlsOverlay by remember { mutableStateOf(true) }
+
+    val samples = remember(history, status.cpuPct, status.memPct) {
+        if (history.isNotEmpty()) history.takeLast(60)
+        else listOf(TelemetrySample(status.cpuPct, status.memPct))
+    }
+
+    val cpuAvg = remember(samples) {
+        if (samples.isEmpty()) 0 else samples.map { it.cpuPct }.average().toInt()
+    }
+    val cpuPeak = remember(samples) {
+        samples.maxOfOrNull { it.cpuPct } ?: 0
+    }
+    val ramFreeGb = remember(status.memUsedMb, status.memTotalMb) {
+        if (status.memTotalMb > 0) {
+            val freeMb = (status.memTotalMb - status.memUsedMb).coerceAtLeast(0)
+            String.format(Locale.US, "%.1f GB", freeMb / 1024.0)
+        } else {
+            "--"
+        }
+    }
+    val ramUsedStr = remember(status.memUsedMb, status.memTotalMb) {
+        if (status.memTotalMb > 0) {
+            String.format(
+                Locale.US,
+                "%.1f / %.0f GB",
+                status.memUsedMb / 1024.0,
+                status.memTotalMb / 1024.0
+            )
+        } else {
+            "-- GB"
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(OrbBg)
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            ) {
+                showControlsOverlay = !showControlsOverlay
+            }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(
+                    start = if (isCoverScreen) 14.dp else 20.dp,
+                    end = if (isCoverScreen) 14.dp else 20.dp,
+                    top = if (isCoverScreen) 10.dp else 16.dp,
+                    bottom = if (isCoverScreen) 14.dp else 20.dp
+                )
+        ) {
+            // Minimal Orb Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(if (paused) OrbAmber else OrbGreen)
+                    )
+                    Text(
+                        text = "Resources",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = if (isCoverScreen) 15.sp else 17.sp
+                        ),
+                        color = OrbFgStrong
+                    )
+                    if (paused) {
+                        Text(
+                            text = "PAUSED",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            ),
+                            color = OrbAmber
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(OrbSurfaceHover)
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close resources view",
+                        tint = OrbFgMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(if (isCoverScreen) 8.dp else 16.dp))
+
+            // Hero Numeric Readouts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(if (isCoverScreen) 10.dp else 14.dp)
+            ) {
+                if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.CPU) {
+                    Surface(
+                        color = OrbSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, OrbBorder),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(
+                                horizontal = if (isCoverScreen) 10.dp else 14.dp,
+                                vertical = if (isCoverScreen) 8.dp else 10.dp
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(OrbBlue)
+                                )
+                                Text(
+                                    text = "CPU",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OrbFgMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "${status.cpuPct}%",
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = if (isCoverScreen) 20.sp else 26.sp
+                                ),
+                                color = OrbFgStrong
+                            )
+                            Text(
+                                text = "avg $cpuAvg% · peak $cpuPeak%",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = OrbFgSubtle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.RAM) {
+                    Surface(
+                        color = OrbSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, OrbBorder),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(
+                                horizontal = if (isCoverScreen) 10.dp else 14.dp,
+                                vertical = if (isCoverScreen) 8.dp else 10.dp
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(OrbGreen)
+                                )
+                                Text(
+                                    text = "MEMORY",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OrbFgMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "${status.memPct}%",
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = if (isCoverScreen) 20.sp else 26.sp
+                                ),
+                                color = OrbFgStrong
+                            )
+                            Text(
+                                text = "$ramUsedStr · $ramFreeGb free",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = OrbFgSubtle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(if (isCoverScreen) 10.dp else 16.dp))
+
+            // Main Interactive Expanded Canvas Graph
+            Surface(
+                color = OrbSurface,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, OrbBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            start = 10.dp,
+                            end = 12.dp,
+                            top = 12.dp,
+                            bottom = 12.dp
+                        )
+                ) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        // Subtle Y-Axis Scale Labels
+                        Column(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .padding(end = 8.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val labels = if (isCoverScreen) listOf("100", "50", "0") else listOf("100%", "75%", "50%", "25%", "0%")
+                            labels.forEach { lbl ->
+                                Text(
+                                    text = lbl,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp
+                                    ),
+                                    color = OrbFgSubtle
+                                )
+                            }
+                        }
+
+                        Canvas(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
+                            val gridFracs = listOf(0.0f, 0.25f, 0.5f, 0.75f, 1.0f)
+                            for (frac in gridFracs) {
+                                val y = 4.dp.toPx() + (size.height - 6.dp.toPx()) * frac
+                                drawLine(
+                                    color = OrbBorder.copy(alpha = if (frac == 0.5f) 0.9f else 0.55f),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1.dp.toPx(),
+                                    pathEffect = if (frac == 0f || frac == 1f) null else dash
+                                )
+                            }
+
+                            if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.RAM) {
+                                drawSmoothAreaSeries(
+                                    values = samples.map { it.memPct.coerceIn(0, 100) / 100f },
+                                    maxSlots = 60,
+                                    color = OrbGreen,
+                                    fillAlpha = 0.20f,
+                                    strokeWidthPx = 2.dp.toPx()
+                                )
+                            }
+                            if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.CPU) {
+                                drawSmoothAreaSeries(
+                                    values = samples.map { it.cpuPct.coerceIn(0, 100) / 100f },
+                                    maxSlots = 60,
+                                    color = OrbBlue,
+                                    fillAlpha = 0.26f,
+                                    strokeWidthPx = 2.dp.toPx()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom clearance for camera cutout on Razr cover screen, or clean metadata footer on main screen
+            if (isCoverScreen) {
+                Spacer(modifier = Modifier.height(68.dp))
+            } else {
+                Spacer(modifier = Modifier.height(70.dp))
+            }
+        }
+
+        // Subtle Translucent Floating Options Overlay Pill (tap graph to show/hide)
+        AnimatedVisibility(
+            visible = showControlsOverlay,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(if (isCoverScreen) Alignment.BottomStart else Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(
+                    start = if (isCoverScreen) 12.dp else 16.dp,
+                    end = if (isCoverScreen) cameraSafeEndPadding else 16.dp,
+                    bottom = if (isCoverScreen) 14.dp else 20.dp
+                )
+        ) {
+            Surface(
+                color = OrbSurface.copy(alpha = 0.92f),
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(1.dp, OrbBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TelemetrySeriesFilter.entries.forEach { option ->
+                        val selected = seriesFilter == option
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (selected) OrbFgStrong else Color.Transparent)
+                                .clickable { seriesFilter = option }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    fontSize = 11.sp
+                                ),
+                                color = if (selected) OrbBg else OrbFgMuted
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(16.dp)
+                            .background(OrbBorder)
+                    )
+
+                    val intervals = listOf(1_000L to "1s", 2_500L to "2.5s", 5_000L to "5s")
+                    intervals.forEach { (ms, label) ->
+                        val selected = intervalMs == ms
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (selected) OrbSurfaceHover else Color.Transparent)
+                                .clickable { onIntervalChange(ms) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = if (selected) OrbFgStrong else OrbFgSubtle
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(16.dp)
+                            .background(OrbBorder)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(if (paused) OrbAmber.copy(alpha = 0.18f) else Color.Transparent)
+                            .clickable(onClick = onTogglePaused),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                            contentDescription = if (paused) "Resume sampling" else "Pause sampling",
+                            tint = if (paused) OrbAmber else OrbFgMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

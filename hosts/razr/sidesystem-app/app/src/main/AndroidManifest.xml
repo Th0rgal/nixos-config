@@ -23,6 +23,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SideSystem">
 
+        <!-- Motorola Razr external cover screen (CLI) full-bleed around twin camera lenses -->
+        <meta-data
+            android:name="moto_cli_fullscreen_mode"
+            android:value="true" />
+        <meta-data
+            android:name="moto_cli_default_display_mode"
+            android:value="fullscreen" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
@@ -30,6 +38,12 @@
             android:launchMode="singleTop"
             android:resizeableActivity="true"
             android:theme="@style/Theme.SideSystem">
+            <meta-data
+                android:name="moto_cli_fullscreen_mode"
+                android:value="true" />
+            <meta-data
+                android:name="moto_cli_default_display_mode"
+                android:value="fullscreen" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
