@@ -186,13 +186,22 @@ in
     ffmpeg
     pulseaudio
     android-tools
-    # Shared personal desktop & CLI parity
+    # Shared personal desktop & CLI parity (matches m2air app suite)
     helium
+    orb-desktop
+    telegram-desktop
+    vesktop
+    bitwarden-desktop
+    signal-desktop-frameless
+    folio-desktop
+    rencal
+    murmure
+    age
+    libsecret
     gh
     bun
     restic
     rclone
-    orb-desktop
     folio-desktop
   ];
 
