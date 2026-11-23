@@ -65,6 +65,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -116,7 +118,8 @@ data class DashboardCallbacks(
     val onDesktopRestart: () -> Unit,
     val onDesktopStop: () -> Unit,
     val onToggleAutostart: (Boolean) -> Unit,
-    val onApplyDisplay: (DisplayResolution, DisplayScale) -> Unit,
+    val onApplyDisplay: (String, DisplayScale) -> Unit,
+    val onToggleBtHidGrab: (Boolean) -> Unit,
     val onSelectProfile: (PowerProfile) -> Unit,
     val onSelectGpuMode: (GpuMode) -> Unit,
     val onCopySsh: (String) -> Unit,
@@ -1117,19 +1120,78 @@ private fun SettingsPanelContent(
     onScaleChange: (DisplayScale) -> Unit,
     callbacks: DashboardCallbacks
 ) {
+    var customResText by remember(status.displayResolutionText) {
+        mutableStateOf(status.displayResolutionText)
+    }
+    LaunchedEffect(selectedResolution) {
+        if (DisplayResolution.fromString(customResText) != selectedResolution) {
+            customResText = selectedResolution.cliValue
+        }
+    }
+    val effectiveResText = customResText.trim().ifEmpty { selectedResolution.cliValue }
     val hasPendingDisplayChange =
-        selectedResolution != status.resolution || selectedScale != status.scale
+        effectiveResText != status.displayResolutionText || selectedScale != status.scale
 
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         // 1. Display
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionLabel("DISPLAY")
-            OrbSegmentedRow(
-                items = DisplayResolution.entries,
-                selected = selectedResolution,
-                labelOf = { it.label },
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                DisplayResolution.entries.forEach { preset ->
+                    val isSelected = effectiveResText.equals(preset.cliValue, ignoreCase = true)
+                    Surface(
+                        color = if (isSelected) OrbFgStrong else OrbBg,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, if (isSelected) OrbFgStrong else OrbBorder),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = busyAction == null) {
+                                onResolutionChange(preset)
+                                customResText = preset.cliValue
+                            }
+                    ) {
+                        Text(
+                            text = preset.label,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                            ),
+                            color = if (isSelected) OrbBg else OrbFgMuted,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = customResText,
+                onValueChange = { customResText = it },
+                singleLine = true,
                 enabled = busyAction == null,
-                onSelect = onResolutionChange
+                placeholder = {
+                    Text(
+                        text = "Any WxH (e.g. 3440x1440, 2560x1600)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OrbFgSubtle
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    color = OrbFgStrong
+                ),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = OrbFgMuted,
+                    unfocusedBorderColor = OrbBorder,
+                    focusedContainerColor = OrbBg,
+                    unfocusedContainerColor = OrbBg,
+                    cursorColor = OrbFgStrong
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1153,11 +1215,11 @@ private fun SettingsPanelContent(
                         .alpha(if (busyAction == null) 1f else 0.45f)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(enabled = busyAction == null) {
-                            callbacks.onApplyDisplay(selectedResolution, selectedScale)
+                            callbacks.onApplyDisplay(effectiveResText, selectedScale)
                         }
                 ) {
                     Box(
-                        modifier = Modifier.padding(horizontal = 18.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -1229,6 +1291,18 @@ private fun SettingsPanelContent(
         // 4. Peripherals & Shortcuts
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionLabel("PERIPHERALS & SHORTCUTS")
+
+            OrbToggleRow(
+                title = "Route BT keyboard/mouse → NixOS",
+                subtitle = if (status.btHidGrab) {
+                    "Active — Bluetooth HID grabbed exclusively for NixOS"
+                } else {
+                    "Off — Bluetooth HID controls Android"
+                },
+                checked = status.btHidGrab,
+                enabled = busyAction == null,
+                onCheckedChange = callbacks.onToggleBtHidGrab
+            )
 
             if (!hasBluetoothPermission) {
                 Row(

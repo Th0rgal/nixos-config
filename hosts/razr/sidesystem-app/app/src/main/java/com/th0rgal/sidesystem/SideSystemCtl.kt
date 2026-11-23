@@ -21,30 +21,46 @@ import java.net.NetworkInterface
 import java.util.concurrent.TimeUnit
 
 enum class DisplayResolution(val cliValue: String, val label: String) {
-    HD_720("720p", "720p"),
-    FHD_1080("1080p", "1080p"),
-    QHD_1440("1440p", "1440p");
+    HD_720("1280x720", "720p"),
+    FHD_1080("1920x1080", "1080p"),
+    QHD_1440("2560x1440", "1440p"),
+    UWQHD_3440("3440x1440", "3440×1440"),
+    UHD_4K("3840x2160", "4K");
 
     companion object {
         fun fromString(raw: String?): DisplayResolution {
             val normalized = raw?.trim()?.lowercase().orEmpty()
             return when {
                 normalized.contains("720") -> HD_720
+                normalized.contains("3440") || normalized.contains("ultrawide") -> UWQHD_3440
+                normalized.contains("3840") || normalized.contains("2160") || normalized.contains("4k") -> UHD_4K
                 normalized.contains("1440") || normalized.contains("2560") -> QHD_1440
                 else -> FHD_1080
             }
+        }
+
+        fun normalizeDisplayText(raw: String?): String {
+            val cleaned = raw?.trim()?.replace("@60", "")?.replace("Hz", "", ignoreCase = true).orEmpty()
+            return if (cleaned.matches(Regex("^\\d{3,4}x\\d{3,4}$"))) cleaned else fromString(raw).cliValue
         }
     }
 }
 
 enum class DisplayScale(val cliValue: String, val label: String, val hint: String) {
-    ONE_X("1", "1x", "External Monitor"),
-    TWO_X("2", "2x", "Phone Screen");
+    HALF_X("0.5", "0.5x", "Zoom Out"),
+    ONE_X("1", "1x", "Native"),
+    ONE_HALF_X("1.5", "1.5x", "Medium"),
+    TWO_X("2", "2x", "HiDPI");
 
     companion object {
         fun fromAny(raw: Any?): DisplayScale {
             val str = raw?.toString()?.trim()?.lowercase().orEmpty()
-            return if (str.startsWith("2")) TWO_X else ONE_X
+            return when {
+                str.startsWith("0.5") -> HALF_X
+                str.startsWith("1.5") -> ONE_HALF_X
+                str.startsWith("2") -> TWO_X
+                else -> ONE_X
+            }
         }
     }
 }
@@ -91,7 +107,9 @@ data class SideSystemStatus(
     val uptime: String = "--",
     val autostart: Boolean = false,
     val resolution: DisplayResolution = DisplayResolution.FHD_1080,
+    val displayResolutionText: String = "1920x1080",
     val scale: DisplayScale = DisplayScale.ONE_X,
+    val btHidGrab: Boolean = false,
     val memUsedMb: Int = 0,
     val memTotalMb: Int = 0,
     val cpuPct: Int = 0,
@@ -231,8 +249,11 @@ object SideSystemCtl {
     suspend fun setAutostart(enabled: Boolean): CommandResult =
         runCtl("autostart", if (enabled) "on" else "off")
 
-    suspend fun applyDisplay(resolution: DisplayResolution, scale: DisplayScale): CommandResult =
-        runCtl("desktop", "start", resolution.cliValue, scale.cliValue, timeoutSeconds = 45L)
+    suspend fun applyDisplay(resolutionSpec: String, scale: DisplayScale): CommandResult =
+        runCtl("desktop", "start", resolutionSpec.trim(), scale.cliValue, timeoutSeconds = 45L)
+
+    suspend fun setBtHidGrab(enabled: Boolean): CommandResult =
+        runCtl("bt-hid", if (enabled) "on" else "off", timeoutSeconds = 15L)
 
     suspend fun setProfile(profile: PowerProfile): CommandResult =
         runCtl("profile", profile.cliValue)
@@ -298,12 +319,13 @@ object SideSystemCtl {
             val uptime = obj.optString("uptime", "--").ifBlank { "--" }
             val autostart = obj.optBoolean("autostart", false)
 
-            val resolution = DisplayResolution.fromString(
-                obj.optString("resolution", obj.optString("display_resolution", obj.optString("display_mode", "1080p")))
-            )
+            val rawDisplay = obj.optString("resolution", obj.optString("display_resolution", obj.optString("display_mode", "1920x1080")))
+            val resolution = DisplayResolution.fromString(rawDisplay)
+            val displayResolutionText = DisplayResolution.normalizeDisplayText(rawDisplay)
             val scale = DisplayScale.fromAny(
                 obj.opt("scale") ?: obj.opt("display_scale") ?: 1
             )
+            val btHidGrab = obj.optBoolean("bt_hid_grab", false)
 
             val memUsed = obj.optInt("mem_used_mb", 0)
             val memTotal = obj.optInt("mem_total_mb", 0)
@@ -347,7 +369,9 @@ object SideSystemCtl {
                 uptime = uptime,
                 autostart = autostart,
                 resolution = resolution,
+                displayResolutionText = displayResolutionText,
                 scale = scale,
+                btHidGrab = btHidGrab,
                 memUsedMb = memUsed,
                 memTotalMb = memTotal,
                 cpuPct = cpuPct,

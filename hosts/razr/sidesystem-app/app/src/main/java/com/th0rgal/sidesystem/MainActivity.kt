@@ -223,12 +223,20 @@ class MainActivity : ComponentActivity() {
                                 SideSystemCtl.setAutostart(enabled)
                             }
                         },
-                        onApplyDisplay = { res, scale ->
+                        onApplyDisplay = { resSpec, scale ->
                             runAction(
                                 "display",
-                                "Applied ${res.label} @ ${scale.label} & restarted desktop"
+                                "Applied $resSpec @ ${scale.label} & restarted desktop"
                             ) {
-                                SideSystemCtl.applyDisplay(res, scale)
+                                SideSystemCtl.applyDisplay(resSpec, scale)
+                            }
+                        },
+                        onToggleBtHidGrab = { enabled ->
+                            runAction(
+                                "bt_hid",
+                                if (enabled) "Bluetooth keyboard/mouse routed to NixOS" else "Bluetooth keyboard/mouse returned to Android"
+                            ) {
+                                SideSystemCtl.setBtHidGrab(enabled)
                             }
                         },
                         onSelectProfile = { profile ->
