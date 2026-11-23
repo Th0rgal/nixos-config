@@ -1,0 +1,28 @@
+diff -ruN a/src/freedreno/vulkan/tu_knl_kgsl.cc b/src/freedreno/vulkan/tu_knl_kgsl.cc
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-23 17:33:54.359457461 +0000
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc	2026-11-23 17:33:54.392060193 +0000
+@@ -1788,10 +1788,6 @@
+ VkResult
+ tu_knl_kgsl_load(struct tu_instance *instance, int fd)
+ {
+-   if (instance->vk.enabled_extensions.KHR_display) {
+-      return vk_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
+-                       "I can't KHR_display");
+-   }
+ 
+    struct tu_physical_device *device = (struct tu_physical_device *)
+       vk_zalloc(&instance->vk.alloc, sizeof(*device), 8,
+diff -ruN a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
+--- a/src/gallium/drivers/zink/zink_screen.c	2026-11-23 17:33:54.357882496 +0000
++++ b/src/gallium/drivers/zink/zink_screen.c	2026-11-23 17:33:54.391855234 +0000
+@@ -1811,6 +1811,10 @@
+          idx = zink_get_display_device(screen, pdev_count, pdevs, dev_major,
+                                        dev_minor);
+ 
++      if (idx == -1 && !cpu && !adapter_luid && pdev_count > 0 &&
++          debug_get_bool_option("ZINK_KGSL_FALLBACK", false))
++         idx = 0;
++
+       if (idx != -1)
+          /* valid cpu device */
+          screen->pdev = pdevs[idx];

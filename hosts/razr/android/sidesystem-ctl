@@ -39,7 +39,7 @@ SSH_PORT=2222
 DISPLAY_MODE="1920x1080@60"
 DISPLAY_SCALE="1"
 PROFILE="balanced"
-GPU_MODE="sw"
+GPU_MODE="hw"
 
 log() {
     ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '0000-00-00 00:00:00')"
@@ -70,7 +70,7 @@ load_state() {
     DISPLAY_MODE="1920x1080@60"
     DISPLAY_SCALE="1"
     PROFILE="balanced"
-    GPU_MODE="sw"
+    GPU_MODE="hw"
 
     if [ -r "$STATE_FILE" ]; then
         while IFS='=' read -r key val; do
@@ -210,6 +210,17 @@ read_cpu_pct() {
     printf '%s %s\n' "$total" "$idle" > "$cpu_cache" 2>/dev/null || true
 }
 
+read_gpu_pct() {
+    GPU_PCT=0
+    if [ -r /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage ]; then
+        raw_gpu="$(tr -dc '0-9' < /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null || true)"
+        if is_uint "$raw_gpu"; then
+            GPU_PCT="$raw_gpu"
+            [ "$GPU_PCT" -gt 100 ] && GPU_PCT=100
+        fi
+    fi
+}
+
 detect_network() {
     NET_TYPE="offline"
     NET_IP=""
@@ -265,6 +276,7 @@ cmd_status() {
     load_state
     read_memory_mb
     read_cpu_pct
+    read_gpu_pct
     detect_network
 
     c_running="false"
@@ -322,7 +334,7 @@ EOF
         bt_hid_val="true"
     fi
 
-    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
         "$c_running" \
         "$c_pid" \
         "$(json_escape "$c_uptime")" \
@@ -338,6 +350,7 @@ EOF
         "$MEM_USED_MB" \
         "$MEM_TOTAL_MB" \
         "$CPU_PCT" \
+        "$GPU_PCT" \
         "$(json_escape "$PROFILE")" \
         "$autostart_val" \
         "$(json_escape "$GPU_MODE")" \
@@ -592,18 +605,32 @@ if [ -z "$SWAY_SOCK" ]; then
     exit 1
 fi
 
-# Configure GPU environment for nested Hyprland.
+# Configure GPU environment for nested Hyprland & Wayland apps.
+# Uses patched mesa-razr-kgsl (ZINK_KGSL_FALLBACK=1 + Turnip KGSL without KHR_display abort)
+# for full hardware Adreno 830 v2 Vulkan 1.4 + OpenGL 4.6 acceleration.
 if [ "$GPU_MODE" = "hw" ]; then
+    MESA_KGSL_DIR="$(ls -1d /nix/store/*-mesa-razr-kgsl-* 2>/dev/null | grep -vE -- '-(debug|opencl|cross_tools|spirv2dxil)$' | head -n 1)"
+    if [ -n "$MESA_KGSL_DIR" ] && [ -d "$MESA_KGSL_DIR/lib" ]; then
+        export LIBGL_DRIVERS_PATH="${MESA_KGSL_DIR}/lib/dri"
+        export GBM_BACKENDS_PATH="${MESA_KGSL_DIR}/lib/gbm"
+        export __EGL_VENDOR_LIBRARY_FILENAMES="${MESA_KGSL_DIR}/share/glvnd/egl_vendor.d/50_mesa.json"
+        export VK_ICD_FILENAMES="${MESA_KGSL_DIR}/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    else
+        export VK_ICD_FILENAMES="/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    fi
     export MESA_LOADER_DRIVER_OVERRIDE=zink
-    export VK_ICD_FILENAMES=/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json
-    export TU_DEBUG=noconform
-    unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER AQ_NO_MODIFIERS WLR_RENDERER_ALLOW_SOFTWARE
+    export GALLIUM_DRIVER=zink
+    export ZINK_KGSL_FALLBACK=1
+    export TU_DEBUG=noconform,sysmem
+    export AQ_NO_MODIFIERS=1
+    export WLR_RENDERER_ALLOW_SOFTWARE=1
+    unset LIBGL_ALWAYS_SOFTWARE
 else
     export LIBGL_ALWAYS_SOFTWARE=1
     export GALLIUM_DRIVER=llvmpipe
     export AQ_NO_MODIFIERS=1
     export WLR_RENDERER_ALLOW_SOFTWARE=1
-    unset MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+    unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
 # Launch Hyprland nested on sway's Wayland socket.
@@ -652,6 +679,14 @@ DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
 SWAY_DISPLAY=${SWAY_SOCK}
 WAYLAND_DISPLAY=${HYPR_SOCK}
 HYPRLAND_INSTANCE_SIGNATURE=${HYPR_SIG}
+MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-}
+GALLIUM_DRIVER=${GALLIUM_DRIVER:-}
+ZINK_KGSL_FALLBACK=${ZINK_KGSL_FALLBACK:-}
+VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-}
+LIBGL_DRIVERS_PATH=${LIBGL_DRIVERS_PATH:-}
+GBM_BACKENDS_PATH=${GBM_BACKENDS_PATH:-}
+__EGL_VENDOR_LIBRARY_FILENAMES=${__EGL_VENDOR_LIBRARY_FILENAMES:-}
+TU_DEBUG=${TU_DEBUG:-}
 ENVEOF
 
 export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"

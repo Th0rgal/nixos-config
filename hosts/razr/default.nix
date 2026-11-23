@@ -142,6 +142,26 @@ in
     weston
     cage
     mesa
+    # Adreno 830 v2 (/dev/kgsl-3d0) patched Mesa Turnip + Zink (ZINK_KGSL_FALLBACK=1 + KHR_display fix)
+    ((pkgs.mesa.override {
+      galliumDrivers = [ "zink" "llvmpipe" "virgl" ];
+      vulkanDrivers = [ "freedreno" ];
+      vulkanLayers = [];
+    }).overrideAttrs (old: {
+      pname = "mesa-razr-kgsl";
+      patches = (old.patches or []) ++ [ ./patches/mesa-razr-kgsl.patch ];
+      mesonFlags = (builtins.filter (f:
+        !(lib.hasPrefix "-Dgallium-rusticl=" f) &&
+        !(lib.hasPrefix "-Dtools=" f) &&
+        !(lib.hasPrefix "-Dteflon=" f)
+      ) (old.mesonFlags or [])) ++ [
+        "-Dgallium-rusticl=false"
+        "-Dtools="
+        "-Dteflon=false"
+      ];
+      postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
+      postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (old.postFixup or "");
+    }))
     vulkan-tools
     mesa-demos
     pulseaudio
