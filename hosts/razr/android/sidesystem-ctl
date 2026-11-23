@@ -1,0 +1,1160 @@
+#!/system/bin/sh
+# sidesystem-ctl — Android-side POSIX /system/bin/sh control CLI for SideSystem (NixOS on Razr).
+#
+# Runs natively on Android Toybox /system/bin/sh under Magisk su without Termux or bash.
+#
+# Usage:
+#   sidesystem-ctl status [--json]
+#   sidesystem-ctl container <start|stop|restart>
+#   sidesystem-ctl desktop <start [1080p|1440p|720p] [1|2]|stop|restart>
+#   sidesystem-ctl profile <eco|balanced|full>
+#   sidesystem-ctl autostart <on|off>
+#   sidesystem-ctl sshd <on|off>
+#   sidesystem-ctl gpu <sw|hw>
+#   sidesystem-ctl clipboard <set <base64-text>|get>
+#   sidesystem-ctl backup now
+#   sidesystem-ctl logs
+
+set -u
+
+export PATH="/data/local/nixos/bin:/data/local/Droidspaces/bin:/system/bin:/vendor/bin:/sbin:${PATH:-/system/bin}"
+
+BASE_DIR="${SIDESYSTEM_DIR:-/data/local/nixos}"
+DROIDSPACES_BIN="${DROIDSPACES_BIN:-${BASE_DIR}/bin/droidspaces}"
+ROOTFS_DIR="${BASE_DIR}/rootfs"
+MNT_DIR="${BASE_DIR}/mnt"
+STATE_FILE="${BASE_DIR}/state.env"
+CONTAINER_LOG="${BASE_DIR}/sidesystem.log"
+BACKUP_LOG="${BASE_DIR}/backup.log"
+AUTOSTART_SCRIPT="/data/adb/service.d/99-sidesystem.sh"
+ANDROID_STORAGE="/storage/emulated/0"
+
+CONTAINER_NAME="razr"
+CONTAINER_HOSTNAME="razr"
+CONTAINER_USER="thomas"
+VNC_PORT=5900
+SSH_PORT=2222
+
+# Default persisted state values
+DISPLAY_MODE="1920x1080@60"
+DISPLAY_SCALE="1"
+PROFILE="balanced"
+GPU_MODE="hw"
+
+log() {
+    ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '0000-00-00 00:00:00')"
+    printf '[%s] [sidesystem-ctl] %s\n' "$ts" "$*" >&2
+    if [ -d "$BASE_DIR" ]; then
+        printf '[%s] [sidesystem-ctl] %s\n' "$ts" "$*" >> "$CONTAINER_LOG" 2>/dev/null || true
+    fi
+}
+
+die() {
+    log "ERROR: $*"
+    exit 1
+}
+
+is_uint() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+json_escape() {
+    # Escape backslashes, double quotes, and strip newlines/tabs for single-line JSON strings.
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\r\n\t' '   '
+}
+
+load_state() {
+    DISPLAY_MODE="1920x1080@60"
+    DISPLAY_SCALE="1"
+    PROFILE="balanced"
+    GPU_MODE="hw"
+
+    if [ -r "$STATE_FILE" ]; then
+        while IFS='=' read -r key val; do
+            case "$key" in
+                DISPLAY_MODE)  [ -n "$val" ] && DISPLAY_MODE="$val" ;;
+                DISPLAY_SCALE) [ -n "$val" ] && DISPLAY_SCALE="$val" ;;
+                PROFILE)       [ -n "$val" ] && PROFILE="$val" ;;
+                GPU_MODE)      [ -n "$val" ] && GPU_MODE="$val" ;;
+            esac
+        done < "$STATE_FILE"
+    fi
+}
+
+save_state() {
+    mkdir -p "$BASE_DIR"
+    tmp_file="${STATE_FILE}.tmp.$$"
+    {
+        printf 'DISPLAY_MODE=%s\n' "$DISPLAY_MODE"
+        printf 'DISPLAY_SCALE=%s\n' "$DISPLAY_SCALE"
+        printf 'PROFILE=%s\n' "$PROFILE"
+        printf 'GPU_MODE=%s\n' "$GPU_MODE"
+    } > "$tmp_file"
+    mv "$tmp_file" "$STATE_FILE"
+}
+
+require_droidspaces() {
+    if [ ! -x "$DROIDSPACES_BIN" ]; then
+        die "droidspaces binary not found or not executable at ${DROIDSPACES_BIN}"
+    fi
+}
+
+is_mounted() {
+    target="$1"
+    if command -v mountpoint >/dev/null 2>&1; then
+        mountpoint -q "$target" 2>/dev/null
+        return $?
+    fi
+    while IFS=' ' read -r _ mnt _; do
+        if [ "$mnt" = "$target" ]; then
+            return 0
+        fi
+    done < /proc/mounts
+    return 1
+}
+
+container_pid() {
+    if [ ! -x "$DROIDSPACES_BIN" ]; then
+        return 1
+    fi
+    pid="$("$DROIDSPACES_BIN" pid --name="$CONTAINER_NAME" 2>/dev/null | tr -d '[:space:]')"
+    if is_uint "$pid" && [ "$pid" -gt 0 ] && [ -d "/proc/$pid" ]; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
+    return 1
+}
+
+format_uptime() {
+    pid="$1"
+    if ! is_uint "$pid" || [ ! -d "/proc/$pid" ]; then
+        printf 'stopped'
+        return 0
+    fi
+    now="$(date +%s 2>/dev/null || echo 0)"
+    start="$(stat -c %Y "/proc/$pid" 2>/dev/null || echo 0)"
+    if ! is_uint "$now" || ! is_uint "$start" || [ "$start" -le 0 ] || [ "$now" -lt "$start" ]; then
+        printf '0m'
+        return 0
+    fi
+    elapsed=$((now - start))
+    days=$((elapsed / 86400))
+    hours=$(((elapsed % 86400) / 3600))
+    mins=$(((elapsed % 3600) / 60))
+    secs=$((elapsed % 60))
+    if [ "$days" -gt 0 ]; then
+        printf '%dd %dh %dm' "$days" "$hours" "$mins"
+    elif [ "$hours" -gt 0 ]; then
+        printf '%dh %dm' "$hours" "$mins"
+    elif [ "$mins" -gt 0 ]; then
+        printf '%dm' "$mins"
+    else
+        printf '%ds' "$secs"
+    fi
+}
+
+read_memory_mb() {
+    mem_total_kb=0
+    mem_avail_kb=0
+    mem_free_kb=0
+    mem_buf_kb=0
+    mem_cached_kb=0
+
+    while IFS=' :' read -r key val _; do
+        case "$key" in
+            MemTotal)     is_uint "$val" && mem_total_kb="$val" ;;
+            MemAvailable) is_uint "$val" && mem_avail_kb="$val" ;;
+            MemFree)      is_uint "$val" && mem_free_kb="$val" ;;
+            Buffers)      is_uint "$val" && mem_buf_kb="$val" ;;
+            Cached)       is_uint "$val" && mem_cached_kb="$val" ;;
+        esac
+    done < /proc/meminfo
+
+    if [ "$mem_avail_kb" -eq 0 ]; then
+        mem_avail_kb=$((mem_free_kb + mem_buf_kb + mem_cached_kb))
+    fi
+
+    MEM_TOTAL_MB=$((mem_total_kb / 1024))
+    mem_used_kb=$((mem_total_kb - mem_avail_kb))
+    if [ "$mem_used_kb" -lt 0 ]; then
+        mem_used_kb=0
+    fi
+    MEM_USED_MB=$((mem_used_kb / 1024))
+}
+
+read_cpu_pct() {
+    CPU_PCT=0
+    cpu_cache="${BASE_DIR}/.cpu_prev"
+    read -r _ u n s id io irq sirq st _ < /proc/stat 2>/dev/null || return 0
+    is_uint "$u" || return 0
+    is_uint "$id" || return 0
+    total=$((u + n + s + id + ${io:-0} + ${irq:-0} + ${sirq:-0} + ${st:-0}))
+    idle=$((id + ${io:-0}))
+
+    if [ -r "$cpu_cache" ]; then
+        read -r prev_total prev_idle < "$cpu_cache" 2>/dev/null || true
+        if is_uint "${prev_total:-}" && is_uint "${prev_idle:-}"; then
+            dt=$((total - prev_total))
+            di=$((idle - prev_idle))
+            if [ "$dt" -gt 0 ]; then
+                busy=$((dt - di))
+                [ "$busy" -lt 0 ] && busy=0
+                CPU_PCT=$(( (busy * 100) / dt ))
+                [ "$CPU_PCT" -gt 100 ] && CPU_PCT=100
+            fi
+        fi
+    fi
+    printf '%s %s\n' "$total" "$idle" > "$cpu_cache" 2>/dev/null || true
+}
+
+read_gpu_pct() {
+    GPU_PCT=0
+    if [ -r /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage ]; then
+        raw_gpu="$(tr -dc '0-9' < /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null || true)"
+        if is_uint "$raw_gpu"; then
+            GPU_PCT="$raw_gpu"
+            [ "$GPU_PCT" -gt 100 ] && GPU_PCT=100
+        fi
+    fi
+}
+
+detect_network() {
+    NET_TYPE="offline"
+    NET_IP=""
+
+    route_line="$(ip route get 1.1.1.1 2>/dev/null | head -n 1)"
+    if [ -n "$route_line" ]; then
+        iface=""
+        # shellcheck disable=SC2086
+        set -- $route_line
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                dev) shift; [ $# -gt 0 ] && iface="$1" ;;
+                src) shift; [ $# -gt 0 ] && NET_IP="$1" ;;
+            esac
+            [ $# -gt 0 ] && shift
+        done
+        case "$iface" in
+            wlan*|wifi*|eth*|en*|usb*|rndis*)
+                NET_TYPE="wifi"
+                ;;
+            rmnet*|ccmni*|pdp*|wwan*|clat*|v4-rmnet*)
+                NET_TYPE="cellular"
+                ;;
+            "")
+                NET_TYPE="offline"
+                ;;
+            *)
+                NET_TYPE="wifi"
+                ;;
+        esac
+    fi
+
+    # Fallback if policy routing prevented `ip route get` from resolving.
+    if [ "$NET_TYPE" = "offline" ]; then
+        wlan_ip="$(ip -4 addr show dev wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
+        if [ -n "$wlan_ip" ]; then
+            NET_TYPE="wifi"
+            NET_IP="$wlan_ip"
+        else
+            cell_ip="$(ip -4 addr show up 2>/dev/null | grep -A 2 -E 'rmnet|ccmni|pdp' | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -n 1)"
+            if [ -n "$cell_ip" ]; then
+                NET_TYPE="cellular"
+                NET_IP="$cell_ip"
+            fi
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# status --json
+# ---------------------------------------------------------------------------
+cmd_status() {
+    load_state
+    read_memory_mb
+    read_cpu_pct
+    read_gpu_pct
+    detect_network
+
+    c_running="false"
+    c_pid=0
+    c_uptime="stopped"
+    s_state="stopped"
+    d_running="false"
+    ssh_running="false"
+
+    if pid="$(container_pid)"; then
+        c_running="true"
+        c_pid="$pid"
+        c_uptime="$(format_uptime "$pid")"
+
+        # Single batched query inside the container for systemd, desktop, and sshd state.
+        probe_out="$("$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
+            PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+            st="$(systemctl is-system-running 2>/dev/null || true)"
+            case "$st" in
+                running)  echo "SYS=running" ;;
+                degraded|starting|initializing|maintenance) echo "SYS=degraded" ;;
+                *) echo "SYS=degraded" ;;
+            esac
+            if pgrep -f "Hyprland" >/dev/null 2>&1 && (pgrep -x wayvnc >/dev/null 2>&1 || ss -tln 2>/dev/null | grep -q ":5900 "); then
+                echo "DESK=true"
+            else
+                echo "DESK=false"
+            fi
+            if systemctl is-active --quiet sshd.service 2>/dev/null; then
+                echo "SSH=true"
+            else
+                echo "SSH=false"
+            fi
+        ' 2>/dev/null | tr -d '\r' || true)"
+
+        s_state="degraded"
+        while IFS='=' read -r k v; do
+            case "$k" in
+                SYS)  [ -n "$v" ] && s_state="$v" ;;
+                DESK) [ "$v" = "true" ] && d_running="true" || d_running="false" ;;
+                SSH)  [ "$v" = "true" ] && ssh_running="true" || ssh_running="false" ;;
+            esac
+        done <<EOF
+$probe_out
+EOF
+    fi
+
+    autostart_val="false"
+    if [ -x "$AUTOSTART_SCRIPT" ]; then
+        autostart_val="true"
+    fi
+
+    bt_hid_val="false"
+    if pgrep -f "/data/local/nixos/bin/bt-hid-bridge" >/dev/null 2>&1; then
+        bt_hid_val="true"
+    fi
+
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
+        "$c_running" \
+        "$c_pid" \
+        "$(json_escape "$c_uptime")" \
+        "$(json_escape "$s_state")" \
+        "$d_running" \
+        "$VNC_PORT" \
+        "$(json_escape "$DISPLAY_MODE")" \
+        "$(json_escape "$DISPLAY_SCALE")" \
+        "$(json_escape "$NET_TYPE")" \
+        "$(json_escape "$NET_IP")" \
+        "$ssh_running" \
+        "$SSH_PORT" \
+        "$MEM_USED_MB" \
+        "$MEM_TOTAL_MB" \
+        "$CPU_PCT" \
+        "$GPU_PCT" \
+        "$(json_escape "$PROFILE")" \
+        "$autostart_val" \
+        "$(json_escape "$GPU_MODE")" \
+        "$bt_hid_val"
+}
+
+# ---------------------------------------------------------------------------
+# container start | stop | restart
+# ---------------------------------------------------------------------------
+ensure_rootfs_mounted() {
+    mkdir -p "$BASE_DIR" "$MNT_DIR"
+    if [ ! -d "$ROOTFS_DIR" ]; then
+        die "Rootfs directory not found: ${ROOTFS_DIR}"
+    fi
+    if is_mounted "$MNT_DIR"; then
+        mount -o remount,bind,rw,exec,dev,suid "$MNT_DIR" 2>/dev/null || true
+    else
+        log "Bind-mounting ${ROOTFS_DIR} -> ${MNT_DIR} (rw,exec,dev,suid)"
+        mount --bind "$ROOTFS_DIR" "$MNT_DIR" || die "Failed to bind-mount ${ROOTFS_DIR}"
+        mount -o remount,bind,rw,exec,dev,suid "$MNT_DIR" || die "Failed to remount ${MNT_DIR} rw,exec,dev,suid"
+    fi
+    mkdir -p "${MNT_DIR}/mnt/android"
+}
+
+cmd_container_start() {
+    require_droidspaces
+    if pid="$(container_pid)"; then
+        log "Container '${CONTAINER_NAME}' is already running (PID ${pid})."
+        return 0
+    fi
+
+    ensure_rootfs_mounted
+    log "Starting container '${CONTAINER_NAME}' via droidspaces..."
+    "$DROIDSPACES_BIN" start \
+        --name="$CONTAINER_NAME" \
+        --hostname="$CONTAINER_HOSTNAME" \
+        --rootfs="$MNT_DIR" \
+        --net=host \
+        --gpu \
+        --init=/sbin/init \
+        --bind="${ANDROID_STORAGE}:/mnt/android" || die "droidspaces start failed"
+
+    pid="$(container_pid || echo unknown)"
+    log "Container '${CONTAINER_NAME}' started (PID ${pid})."
+
+    # Re-apply persisted performance profile if set.
+    load_state
+    apply_profile_live "$PROFILE" || true
+}
+
+cmd_container_stop() {
+    require_droidspaces
+    if container_pid >/dev/null 2>&1; then
+        log "Stopping desktop session before container shutdown..."
+        cmd_desktop_stop >/dev/null 2>&1 || true
+        log "Stopping container '${CONTAINER_NAME}' via droidspaces..."
+        "$DROIDSPACES_BIN" stop --name="$CONTAINER_NAME" || die "droidspaces stop failed"
+    else
+        log "Container '${CONTAINER_NAME}' is not running."
+    fi
+
+    if is_mounted "$MNT_DIR"; then
+        umount -R "$MNT_DIR" 2>/dev/null || umount -l "$MNT_DIR" 2>/dev/null || true
+    fi
+}
+
+cmd_container() {
+    sub="${1:-}"
+    case "$sub" in
+        start)   cmd_container_start ;;
+        stop)    cmd_container_stop ;;
+        restart) cmd_container_stop; sleep 1; cmd_container_start ;;
+        *)       die "Usage: sidesystem-ctl container <start|stop|restart>" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# desktop start [1080p|1440p|720p] [1|2] | stop | restart
+# ---------------------------------------------------------------------------
+normalize_resolution() {
+    case "$1" in
+        1080p|1920x1080|1920x1080@60|1920x1080@60Hz)
+            DISPLAY_MODE="1920x1080@60"
+            SWAY_RES="1920x1080@60Hz"
+            ;;
+        1440p|2560x1440|2560x1440@60|2560x1440@60Hz)
+            DISPLAY_MODE="2560x1440@60"
+            SWAY_RES="2560x1440@60Hz"
+            ;;
+        ultrawide|uwqhd|3440x1440|3440x1440@60|3440x1440@60Hz)
+            DISPLAY_MODE="3440x1440@60"
+            SWAY_RES="3440x1440@60Hz"
+            ;;
+        4k|2160p|3840x2160|3840x2160@60|3840x2160@60Hz)
+            DISPLAY_MODE="3840x2160@60"
+            SWAY_RES="3840x2160@60Hz"
+            ;;
+        720p|1280x720|1280x720@60|1280x720@60Hz)
+            DISPLAY_MODE="1280x720@60"
+            SWAY_RES="1280x720@60Hz"
+            ;;
+        *)
+            # Support any arbitrary WxH or WxH@Hz resolution (e.g. 2560x1600, 3440x1440)
+            clean_res="$(printf '%s' "$1" | sed -E 's/@[0-9]+(Hz)?$//i')"
+            case "$clean_res" in
+                *[!0-9x]*)
+                    die "Unsupported resolution '$1' (use WxH like 3440x1440 or 720p/1080p/1440p/ultrawide/4k)"
+                    ;;
+                *x*)
+                    w="${clean_res%%x*}"
+                    h="${clean_res#*x}"
+                    if is_uint "$w" && is_uint "$h" && [ "$w" -ge 640 ] && [ "$w" -le 7680 ] && [ "$h" -ge 480 ] && [ "$h" -le 4320 ]; then
+                        DISPLAY_MODE="${w}x${h}@60"
+                        SWAY_RES="${w}x${h}@60Hz"
+                    else
+                        die "Resolution '$1' out of range (expected 640x480..7680x4320)"
+                    fi
+                    ;;
+                *)
+                    die "Unsupported resolution '$1' (use WxH like 3440x1440 or 720p/1080p/1440p/ultrawide/4k)"
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+cmd_desktop_stop() {
+    require_droidspaces
+    if ! container_pid >/dev/null 2>&1; then
+        log "Container is not running; nothing to stop."
+        return 0
+    fi
+    log "Stopping desktop processes (wayvnc, omarchy-launch-shell, quickshell, Hyprland, sway)..."
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /run/current-system/sw/bin/su - "$CONTAINER_USER" -c '
+        PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+        for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+            pkill -TERM -f "$proc" 2>/dev/null || true
+        done
+        sleep 1
+        for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+            pkill -KILL -f "$proc" 2>/dev/null || true
+        done
+        rm -rf /tmp/xdg-razr/hypr /tmp/xdg-razr/wayland-* /tmp/xdg-razr/sway-ipc.* 2>/dev/null || true
+        exit 0
+    ' >/dev/null 2>&1 || true
+}
+
+cmd_desktop_start() {
+    require_droidspaces
+    load_state
+
+    req_res="${1:-$DISPLAY_MODE}"
+    req_scale="${2:-$DISPLAY_SCALE}"
+
+    normalize_resolution "$req_res"
+    case "$req_scale" in
+        0.5|0.75|1|1.0|1.25|1.5|1.75|2|2.0|2.5|3|3.0)
+            DISPLAY_SCALE="$req_scale"
+            ;;
+        *)
+            die "Unsupported scale '$req_scale' (expected 0.5, 0.75, 1, 1.25, 1.5, 2, etc.)"
+            ;;
+    esac
+
+    save_state
+
+    if ! container_pid >/dev/null 2>&1; then
+        cmd_container_start
+        sleep 2
+    fi
+
+    log "Starting desktop (${SWAY_RES}, scale=${DISPLAY_SCALE}, gpu=${GPU_MODE}, vnc=127.0.0.1:${VNC_PORT})..."
+
+    # Stage the session bootstrap script inside the container's /tmp (avoids nested shell quoting issues).
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c \
+        'cat > /tmp/sidesystem-desktop-start.sh && chmod 755 /tmp/sidesystem-desktop-start.sh' <<'EOF'
+#!/bin/sh
+set -u
+
+SWAY_RES="$1"
+SCALE="$2"
+GPU_MODE="$3"
+VNC_PORT="$4"
+
+export PATH="/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
+export XDG_RUNTIME_DIR="/tmp/xdg-razr"
+
+# Clean up any previous desktop stack (match wrapped binaries like .Hyprland-wrapped too).
+for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+    pkill -TERM -f "$proc" 2>/dev/null || true
+done
+sleep 1
+for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+    pkill -KILL -f "$proc" 2>/dev/null || true
+done
+
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+rm -rf "${XDG_RUNTIME_DIR}/hypr" "${XDG_RUNTIME_DIR}"/wayland-* "${XDG_RUNTIME_DIR}"/sway-ipc.* 2>/dev/null || true
+
+# Start session D-Bus if not already listening.
+DBUS_SOCK="${XDG_RUNTIME_DIR}/bus"
+if [ ! -S "$DBUS_SOCK" ]; then
+    rm -f "$DBUS_SOCK"
+    nohup dbus-daemon --session --address="unix:path=${DBUS_SOCK}" --nofork --nopidfile \
+        >"${XDG_RUNTIME_DIR}/dbus.log" 2>&1 </dev/null &
+    i=0
+    while [ "$i" -lt 25 ]; do
+        [ -S "$DBUS_SOCK" ] && break
+        sleep 0.2
+        i=$((i + 1))
+    done
+fi
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCK}"
+
+# Write headless sway config (scale applied directly on HEADLESS-1 so 0.5x..2x works cleanly).
+cat > /tmp/razr-sway.conf <<SWAYEOF
+output HEADLESS-1 resolution ${SWAY_RES} scale ${SCALE}
+default_border none
+default_floating_border none
+for_window [app_id=".*"] fullscreen enable
+for_window [class=".*"] fullscreen enable
+SWAYEOF
+
+# Configure GPU environment for BOTH outer headless sway and nested Hyprland & Wayland apps.
+# Uses patched mesa-razr-kgsl (ZINK_KGSL_FALLBACK=1 + Turnip KGSL without KHR_display abort)
+# with 12 MiB on-die GMEM enabled (TU_DEBUG=noconform) for full Adreno 830 v2 acceleration.
+if [ "$GPU_MODE" = "hw" ]; then
+    MESA_KGSL_DIR="$(ls -1d /nix/store/*-mesa-razr-kgsl-* 2>/dev/null | grep -vE -- '-(debug|opencl|cross_tools|spirv2dxil)$' | head -n 1)"
+    if [ -n "$MESA_KGSL_DIR" ] && [ -d "$MESA_KGSL_DIR/lib" ]; then
+        export LIBGL_DRIVERS_PATH="${MESA_KGSL_DIR}/lib/dri"
+        export GBM_BACKENDS_PATH="${MESA_KGSL_DIR}/lib/gbm"
+        export __EGL_VENDOR_LIBRARY_FILENAMES="${MESA_KGSL_DIR}/share/glvnd/egl_vendor.d/50_mesa.json"
+        export VK_ICD_FILENAMES="${MESA_KGSL_DIR}/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    else
+        export VK_ICD_FILENAMES="/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    fi
+    export MESA_LOADER_DRIVER_OVERRIDE=zink
+    export GALLIUM_DRIVER=zink
+    export ZINK_KGSL_FALLBACK=1
+    export TU_DEBUG=noconform
+    export AQ_NO_MODIFIERS=1
+    export WLR_RENDERER_ALLOW_SOFTWARE=1
+    unset LIBGL_ALWAYS_SOFTWARE
+else
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export GALLIUM_DRIVER=llvmpipe
+    export AQ_NO_MODIFIERS=1
+    export WLR_RENDERER_ALLOW_SOFTWARE=1
+    unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
+fi
+
+# Launch headless sway (uses Adreno 830 Zink+Turnip when gpu=hw, or llvmpipe when gpu=sw).
+WLR_BACKENDS=headless \
+WLR_LIBINPUT_NO_DEVICES=1 \
+WLR_RENDERER_ALLOW_SOFTWARE=1 \
+    nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
+
+SWAY_SOCK=""
+i=0
+while [ "$i" -lt 50 ]; do
+    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+        case "$s" in
+            *.lock) continue ;;
+        esac
+        if [ -S "$s" ]; then
+            SWAY_SOCK="$(basename "$s")"
+            break
+        fi
+    done
+    [ -n "$SWAY_SOCK" ] && break
+    sleep 0.2
+    i=$((i + 1))
+done
+
+if [ -z "$SWAY_SOCK" ]; then
+    echo "ERROR: headless sway Wayland socket did not appear" >&2
+    exit 1
+fi
+
+# Launch Hyprland nested on sway's Wayland socket via start-hyprland (avoids startup warning banner).
+HYPR_LAUNCHER="Hyprland"
+if command -v start-hyprland >/dev/null 2>&1; then
+    HYPR_LAUNCHER="start-hyprland"
+fi
+WAYLAND_DISPLAY="$SWAY_SOCK" \
+XDG_SESSION_TYPE=wayland \
+XDG_CURRENT_DESKTOP=Hyprland \
+    nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+
+HYPR_SIG=""
+HYPR_SOCK=""
+i=0
+while [ "$i" -lt 60 ]; do
+    for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
+        if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
+            HYPR_SIG="$(basename "$d")"
+            break
+        fi
+    done
+    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+        case "$s" in
+            *.lock) continue ;;
+        esac
+        bn="$(basename "$s")"
+        if [ -S "$s" ] && [ "$bn" != "$SWAY_SOCK" ]; then
+            HYPR_SOCK="$bn"
+            break
+        fi
+    done
+    [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
+    sleep 0.25
+    i=$((i + 1))
+done
+
+if [ -z "$HYPR_SIG" ]; then
+    echo "ERROR: Hyprland IPC did not appear" >&2
+    exit 1
+fi
+if [ -z "$HYPR_SOCK" ]; then
+    HYPR_SOCK="$SWAY_SOCK"
+fi
+
+# Persist live Wayland/Hyprland session environment for clipboard and helper tools.
+cat > "${XDG_RUNTIME_DIR}/session.env" <<ENVEOF
+XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
+SWAY_DISPLAY=${SWAY_SOCK}
+WAYLAND_DISPLAY=${HYPR_SOCK}
+HYPRLAND_INSTANCE_SIGNATURE=${HYPR_SIG}
+MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-}
+GALLIUM_DRIVER=${GALLIUM_DRIVER:-}
+ZINK_KGSL_FALLBACK=${ZINK_KGSL_FALLBACK:-}
+VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-}
+LIBGL_DRIVERS_PATH=${LIBGL_DRIVERS_PATH:-}
+GBM_BACKENDS_PATH=${GBM_BACKENDS_PATH:-}
+__EGL_VENDOR_LIBRARY_FILENAMES=${__EGL_VENDOR_LIBRARY_FILENAMES:-}
+TU_DEBUG=${TU_DEBUG:-}
+ENVEOF
+
+export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
+export WAYLAND_DISPLAY="$HYPR_SOCK"
+
+# Configure nested monitor scale.
+hyprctl keyword monitor "WAYLAND-1,preferred,0x0,${SCALE}" >/dev/null 2>&1 || true
+
+# Launch Omarchy shell bar & plugins.
+if command -v omarchy-launch-shell >/dev/null 2>&1; then
+    nohup omarchy-launch-shell >"${XDG_RUNTIME_DIR}/omarchy-shell.log" 2>&1 </dev/null &
+fi
+
+# Launch wallpaper via swaybg ONLY if the per-Space workspace-wallpapers plugin is not installed.
+if [ ! -f "${HOME}/.config/omarchy/workspace-wallpapers.json" ] && command -v swaybg >/dev/null 2>&1; then
+    WP=""
+    for candidate in \
+        "${HOME}/.config/omarchy/current/background" \
+        "${HOME}/Pictures/Wallpapers/default.jpg" \
+        "${HOME}/Pictures/Wallpapers/default.png"; do
+        if [ -r "$candidate" ]; then
+            WP="$candidate"
+            break
+        fi
+    done
+    if [ -n "$WP" ]; then
+        nohup swaybg -i "$WP" -m fill >"${XDG_RUNTIME_DIR}/swaybg.log" 2>&1 </dev/null &
+    else
+        nohup swaybg -c '#0b0f17' >"${XDG_RUNTIME_DIR}/swaybg.log" 2>&1 </dev/null &
+    fi
+fi
+
+# Launch wayvnc attached to headless sway's Wayland socket on 127.0.0.1:<VNC_PORT>.
+# -r renders the Wayland cursor into the stream so BT mouse & remote pointer stay visible.
+WAYLAND_DISPLAY="$SWAY_SOCK" \
+    nohup wayvnc -r 127.0.0.1 "$VNC_PORT" >"${XDG_RUNTIME_DIR}/wayvnc.log" 2>&1 </dev/null &
+
+exit 0
+EOF
+
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run \
+        /run/current-system/sw/bin/su - "$CONTAINER_USER" -c \
+        "/bin/sh /tmp/sidesystem-desktop-start.sh '${SWAY_RES}' '${DISPLAY_SCALE}' '${GPU_MODE}' '${VNC_PORT}'" \
+        || die "Failed to start desktop session inside container"
+
+    ensure_container_hw_bridge
+    apply_profile_live "$PROFILE" || true
+    log "Desktop started (${DISPLAY_MODE}, scale=${DISPLAY_SCALE}, gpu=${GPU_MODE}, profile=${PROFILE}, VNC 127.0.0.1:${VNC_PORT})."
+}
+
+cmd_desktop() {
+    sub="${1:-}"
+    [ $# -gt 0 ] && shift
+    case "$sub" in
+        start)   cmd_desktop_start "$@" ;;
+        stop)    cmd_desktop_stop ;;
+        restart) cmd_desktop_stop; sleep 1; cmd_desktop_start "$@" ;;
+        *)       die "Usage: sidesystem-ctl desktop <start [1080p|1440p|720p] [1|2]|stop|restart>" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# profile eco (power-saver) | balanced | full (performance)
+# ---------------------------------------------------------------------------
+ensure_container_hw_bridge() {
+    # Expose Hexagon V79 NPU FastRPC devices + /run/sidesystem power-profile bridge inside container
+    if ! container_pid >/dev/null 2>&1; then
+        return 0
+    fi
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
+        mkdir -p /run/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
+        chmod 755 /run/sidesystem
+        touch /run/sidesystem/power-profile /run/sidesystem/power-profile-req
+        chmod 644 /run/sidesystem/power-profile
+        chmod 666 /run/sidesystem/power-profile-req
+        [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
+        [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
+        chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure 2>/dev/null || true
+    ' >/dev/null 2>&1 || true
+
+    # Start lightweight host-side power-profile request watcher so Omarchy Shell top bar
+    # can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
+    if ! pgrep -f "sidesystem-powerd" >/dev/null 2>&1; then
+        cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
+#!/system/bin/sh
+REQ="/data/local/nixos/mnt/run/sidesystem/power-profile-req"
+while true; do
+    if [ -s "$REQ" ]; then
+        val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
+        : > "$REQ" 2>/dev/null || true
+        case "$val" in
+            power-saver|eco)         /data/local/nixos/bin/sidesystem-ctl profile eco >/dev/null 2>&1 || true ;;
+            balanced)                /data/local/nixos/bin/sidesystem-ctl profile balanced >/dev/null 2>&1 || true ;;
+            performance|full)        /data/local/nixos/bin/sidesystem-ctl profile full >/dev/null 2>&1 || true ;;
+        esac
+    fi
+    sleep 1
+done
+PWRD
+        chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
+        nohup "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
+    fi
+}
+
+apply_profile_live() {
+    prof="$1"
+    case "$prof" in
+        eco|power-saver)
+            prof="eco"
+            omarchy_name="power-saver"
+            cpus="0-5"; mask="3f"; nice_val="5"
+            cpu0_gov="walt"; cpu6_gov="walt"
+            cpu0_max="1958400"; cpu6_max="1267200"
+            gpu_max_lvl="9"; gpu_min_lvl="13"; gpu_def_lvl="12"
+            blur_passes="1"
+            ;;
+        balanced)
+            omarchy_name="balanced"
+            cpus="0-7"; mask="ff"; nice_val="0"
+            cpu0_gov="walt"; cpu6_gov="walt"
+            cpu0_max="3532800"; cpu6_max="4320000"
+            gpu_max_lvl="0"; gpu_min_lvl="13"; gpu_def_lvl="9"
+            blur_passes="3"
+            ;;
+        full|performance)
+            prof="full"
+            omarchy_name="performance"
+            cpus="0-7"; mask="ff"; nice_val="-2"
+            cpu0_gov="performance"; cpu6_gov="performance"
+            cpu0_max="3532800"; cpu6_max="4320000"
+            gpu_max_lvl="0"; gpu_min_lvl="4"; gpu_def_lvl="0"
+            blur_passes="3"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    # 1. Tune Oryon CPU clusters (policy0: 6x Phoenix-M @ 3.53GHz, policy6: 2x Phoenix-L @ 4.32GHz)
+    printf '%s\n' "$cpu0_gov" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null || true
+    printf '%s\n' "$cpu6_gov" > /sys/devices/system/cpu/cpufreq/policy6/scaling_governor 2>/dev/null || true
+    printf '%s\n' "$cpu0_max" > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 2>/dev/null || true
+    printf '%s\n' "$cpu6_max" > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+
+    # 2. Tune Adreno 830 v2 KGSL DVFS power levels (0 = 1.10 GHz, 4 = 832 MHz, 9 = 443 MHz, 13 = 160 MHz)
+    printf '%s\n' "$gpu_max_lvl" > /sys/class/kgsl/kgsl-3d0/max_pwrlevel 2>/dev/null || true
+    printf '%s\n' "$gpu_min_lvl" > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+    printf '%s\n' "$gpu_def_lvl" > /sys/class/kgsl/kgsl-3d0/default_pwrlevel 2>/dev/null || true
+
+    cpid="$(container_pid || true)"
+    if [ -z "$cpid" ]; then
+        return 0
+    fi
+
+    # 3. Publish active Omarchy profile state & adjust Hyprland Kawase blur passes live
+    ensure_container_hw_bridge
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c "
+        printf '%s\n' '${omarchy_name}' > /run/sidesystem/power-profile 2>/dev/null || true
+        if [ -r /tmp/xdg-razr/session.env ]; then
+            /run/current-system/sw/bin/su -s /bin/sh - ${CONTAINER_USER} -c '
+                set -a; . /tmp/xdg-razr/session.env; set +a
+                /run/current-system/sw/bin/hyprctl --quiet eval \"hl.config({ decoration = { blur = { passes = ${blur_passes} } } })\" >/dev/null 2>&1 || true
+            '
+        fi
+    " >/dev/null 2>&1 || true
+
+    # If the container lives in a dedicated cgroup v2 cpuset, apply cpuset.cpus there too.
+    cg_rel="$(sed -n 's/^0:://p' "/proc/${cpid}/cgroup" 2>/dev/null | head -n 1)"
+    if [ -n "$cg_rel" ] && [ "$cg_rel" != "/" ]; then
+        for cg_base in /sys/fs/cgroup /dev/cpuset; do
+            if [ -w "${cg_base}${cg_rel}/cpuset.cpus" ]; then
+                printf '%s\n' "$cpus" > "${cg_base}${cg_rel}/cpuset.cpus" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    # Apply renice + taskset to every process in the container's PID namespace.
+    target_ns="$(readlink "/proc/${cpid}/ns/pid" 2>/dev/null || true)"
+    if [ -z "$target_ns" ]; then
+        renice -n "$nice_val" -p "$cpid" >/dev/null 2>&1 || renice "$nice_val" "$cpid" >/dev/null 2>&1 || true
+        taskset -cp "$cpus" "$cpid" >/dev/null 2>&1 || taskset -p "$mask" "$cpid" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    for pdir in /proc/[0-9]*; do
+        p="${pdir#/proc/}"
+        p_ns="$(readlink "${pdir}/ns/pid" 2>/dev/null || true)"
+        if [ "$p_ns" = "$target_ns" ]; then
+            renice -n "$nice_val" -p "$p" >/dev/null 2>&1 || renice "$nice_val" "$p" >/dev/null 2>&1 || true
+            taskset -cp "$cpus" "$p" >/dev/null 2>&1 || taskset -p "$mask" "$p" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+cmd_profile() {
+    prof="${1:-}"
+    case "$prof" in
+        eco|balanced|full) ;;
+        *) die "Usage: sidesystem-ctl profile <eco|balanced|full>" ;;
+    esac
+
+    load_state
+    PROFILE="$prof"
+    save_state
+    apply_profile_live "$prof"
+    log "Performance profile set to '${prof}'."
+}
+
+# ---------------------------------------------------------------------------
+# autostart on | off
+# ---------------------------------------------------------------------------
+cmd_autostart() {
+    mode="${1:-}"
+    case "$mode" in
+        on)
+            mkdir -p /data/adb/service.d
+            cat > "$AUTOSTART_SCRIPT" <<'EOF'
+#!/system/bin/sh
+# Auto-start SideSystem NixOS container after Android boot completes.
+while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
+    sleep 2
+done
+sleep 5
+/data/local/nixos/bin/sidesystem-ctl container start >> /data/local/nixos/sidesystem.log 2>&1
+EOF
+            chmod 755 "$AUTOSTART_SCRIPT"
+            log "Autostart enabled (${AUTOSTART_SCRIPT})."
+            ;;
+        off)
+            rm -f "$AUTOSTART_SCRIPT"
+            log "Autostart disabled."
+            ;;
+        *)
+            die "Usage: sidesystem-ctl autostart <on|off>"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# sshd on | off
+# ---------------------------------------------------------------------------
+cmd_sshd() {
+    mode="${1:-}"
+    require_droidspaces
+    container_pid >/dev/null 2>&1 || die "Container '${CONTAINER_NAME}' is not running."
+    case "$mode" in
+        on)
+            "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /run/current-system/sw/bin/systemctl start sshd.service \
+                || die "Failed to start sshd.service"
+            log "sshd.service started."
+            ;;
+        off)
+            "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /run/current-system/sw/bin/systemctl stop sshd.service \
+                || die "Failed to stop sshd.service"
+            log "sshd.service stopped."
+            ;;
+        *)
+            die "Usage: sidesystem-ctl sshd <on|off>"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# gpu sw | hw
+# ---------------------------------------------------------------------------
+cmd_gpu() {
+    mode="${1:-}"
+    case "$mode" in
+        sw|hw) ;;
+        *) die "Usage: sidesystem-ctl gpu <sw|hw>" ;;
+    esac
+
+    load_state
+    GPU_MODE="$mode"
+    save_state
+
+    if container_pid >/dev/null 2>&1; then
+        "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /run/current-system/sw/bin/su - "$CONTAINER_USER" -c \
+            "mkdir -p \"\${HOME}/.config\" && printf '%s\n' '${mode}' > \"\${HOME}/.config/razr-gpu-mode\"" \
+            >/dev/null 2>&1 || true
+    fi
+
+    log "GPU mode set to '${mode}' (restart desktop to apply)."
+}
+
+# ---------------------------------------------------------------------------
+# clipboard set <base64-text> | get
+# ---------------------------------------------------------------------------
+cmd_clipboard() {
+    sub="${1:-}"
+    require_droidspaces
+    container_pid >/dev/null 2>&1 || die "Container '${CONTAINER_NAME}' is not running."
+
+    case "$sub" in
+        set)
+            b64="${2:-}"
+            [ -n "$b64" ] || die "Usage: sidesystem-ctl clipboard set <base64-text>"
+            printf '%s' "$b64" | "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run \
+                /run/current-system/sw/bin/su - "$CONTAINER_USER" -c '
+                    PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+                    export XDG_RUNTIME_DIR="/tmp/xdg-razr"
+                    [ -r "${XDG_RUNTIME_DIR}/session.env" ] && . "${XDG_RUNTIME_DIR}/session.env"
+                    if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+                        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+                            case "$s" in *.lock) continue ;; esac
+                            [ -S "$s" ] && WAYLAND_DISPLAY="$(basename "$s")"
+                        done
+                    fi
+                    export WAYLAND_DISPLAY
+                    base64 -d | wl-copy >/dev/null 2>&1
+                ' || die "Failed to set Wayland clipboard"
+            ;;
+        get)
+            "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run \
+                /run/current-system/sw/bin/su - "$CONTAINER_USER" -c '
+                    PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+                    export XDG_RUNTIME_DIR="/tmp/xdg-razr"
+                    [ -r "${XDG_RUNTIME_DIR}/session.env" ] && . "${XDG_RUNTIME_DIR}/session.env"
+                    if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+                        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+                            case "$s" in *.lock) continue ;; esac
+                            [ -S "$s" ] && WAYLAND_DISPLAY="$(basename "$s")"
+                        done
+                    fi
+                    export WAYLAND_DISPLAY
+                    wl-paste --no-newline 2>/dev/null || wl-paste 2>/dev/null || true
+                '
+            ;;
+        *)
+            die "Usage: sidesystem-ctl clipboard <set <base64-text>|get>"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# backup now
+# ---------------------------------------------------------------------------
+cmd_backup() {
+    sub="${1:-}"
+    [ "$sub" = "now" ] || die "Usage: sidesystem-ctl backup now"
+    require_droidspaces
+    container_pid >/dev/null 2>&1 || die "Container '${CONTAINER_NAME}' is not running."
+
+    mkdir -p "$BASE_DIR"
+    ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 'now')"
+    printf '\n=== [%s] Starting razr-restic backup ===\n' "$ts" >> "$BACKUP_LOG"
+
+    nohup "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run \
+        /run/current-system/sw/bin/su - "$CONTAINER_USER" -c '
+            PATH="/run/current-system/sw/bin:/etc/profiles/per-user/thomas/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            if command -v backup >/dev/null 2>&1 && systemctl --user status >/dev/null 2>&1; then
+                exec backup now
+            fi
+            export RESTIC_REPOSITORY="rclone:gdrive:01 — Backups & Infra/razr-restic"
+            if [ -r /run/secrets/restic_password ]; then
+                export RESTIC_PASSWORD_FILE="/run/secrets/restic_password"
+            fi
+            exec restic backup \
+                --exclude-if-present=.git \
+                --exclude-caches \
+                --one-file-system \
+                --tag=razr \
+                "${HOME}/Notes" "${HOME}/work" "${HOME}/Pictures" "${HOME}/Downloads" \
+                "${HOME}/.ssh" "${HOME}/.gnupg" "${HOME}/.config" "${HOME}/.local/share"
+        ' >> "$BACKUP_LOG" 2>&1 </dev/null &
+
+    log "Triggered razr-restic backup in background (log: ${BACKUP_LOG})."
+}
+
+# ---------------------------------------------------------------------------
+# logs
+# ---------------------------------------------------------------------------
+cmd_logs() {
+    {
+        if [ -r "$CONTAINER_LOG" ]; then
+            printf '--- sidesystem-ctl (%s) ---\n' "$CONTAINER_LOG"
+            tail -n 20 "$CONTAINER_LOG" 2>/dev/null || true
+        fi
+        if container_pid >/dev/null 2>&1; then
+            "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
+                for lf in /tmp/xdg-razr/hyprland.log /tmp/xdg-razr/wayvnc.log /tmp/xdg-razr/sway.log; do
+                    if [ -r "$lf" ]; then
+                        printf -- "--- %s ---\n" "$lf"
+                        tail -n 20 "$lf" 2>/dev/null || true
+                    fi
+                done
+            ' 2>/dev/null || true
+        fi
+    } | tail -n 60
+}
+
+# ---------------------------------------------------------------------------
+# bt-hid on | off  (Exclusive Bluetooth keyboard & mouse grab -> NixOS wayvnc)
+# ---------------------------------------------------------------------------
+cmd_bt_hid() {
+    mode="${1:-}"
+    bridge_bin="${BASE_DIR}/bin/bt-hid-bridge"
+    bridge_log="${BASE_DIR}/bt-hid.log"
+    case "$mode" in
+        on|start)
+            if [ ! -x "$bridge_bin" ]; then
+                die "bt-hid-bridge not found at ${bridge_bin}"
+            fi
+            pkill -TERM -f "$bridge_bin" 2>/dev/null || true
+            sleep 0.3
+            nohup "$bridge_bin" "$VNC_PORT" >"$bridge_log" 2>&1 </dev/null &
+            sleep 0.5
+            if pgrep -f "$bridge_bin" >/dev/null 2>&1; then
+                log "Bluetooth HID bridge started (MX keyboard/mouse routed to NixOS)."
+            else
+                die "bt-hid-bridge exited unexpectedly (see ${bridge_log})"
+            fi
+            ;;
+        off|stop)
+            pkill -TERM -f "$bridge_bin" 2>/dev/null || true
+            sleep 0.3
+            pkill -KILL -f "$bridge_bin" 2>/dev/null || true
+            log "Bluetooth HID bridge stopped (keyboard/mouse returned to Android)."
+            ;;
+        *)
+            die "Usage: sidesystem-ctl bt-hid <on|off>"
+            ;;
+    esac
+}
+
+usage() {
+    cat <<'EOF'
+Usage: sidesystem-ctl <command> [args...]
+
+Commands:
+  status [--json]                            Print system & desktop status JSON
+  container <start|stop|restart>             Manage the NixOS droidspaces container
+  desktop <start [WxH] [scale]|stop|restart> Manage headless sway + Hyprland + wayvnc
+                                             res: 720p|1080p|1440p|ultrawide|4k|WxH
+                                             scale: 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2
+  bt-hid <on|off>                            Route Bluetooth keyboard & mouse directly to NixOS
+  profile <eco|balanced|full>                Set & apply live CPU/nice profile
+  autostart <on|off>                         Enable/disable Magisk boot autostart
+  sshd <on|off>                              Start/stop sshd.service inside container
+  gpu <sw|hw>                                Persist GPU rendering mode (llvmpipe / Zink+Turnip)
+  clipboard <set <base64-text>|get>          Bridge Android clipboard with Wayland
+  backup now                                 Trigger razr-restic backup in background
+  logs                                       Show last 60 lines of container/Hyprland/wayvnc logs
+EOF
+}
+
+main() {
+    cmd="${1:-}"
+    [ $# -gt 0 ] && shift
+
+    case "$cmd" in
+        status)    cmd_status "$@" ;;
+        container) cmd_container "$@" ;;
+        desktop)   cmd_desktop "$@" ;;
+        bt-hid)    cmd_bt_hid "$@" ;;
+        profile)   cmd_profile "$@" ;;
+        autostart) cmd_autostart "$@" ;;
+        sshd)      cmd_sshd "$@" ;;
+        gpu)       cmd_gpu "$@" ;;
+        clipboard) cmd_clipboard "$@" ;;
+        backup)    cmd_backup "$@" ;;
+        logs)      cmd_logs "$@" ;;
+        -h|--help|"") usage ;;
+        *)         usage >&2; die "Unknown command: ${cmd}" ;;
+    esac
+}
+
+main "$@"

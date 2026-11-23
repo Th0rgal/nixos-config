@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# razr-gpu-mode — Toggle between Adreno Turnip+Zink hardware acceleration and software rendering.
+#
+# Persists selection to ~/.config/razr-gpu-mode (and writes ~/.config/razr-gpu-mode.env
+# for shell / launcher sourcing).
+#
+# Modes:
+#   hw     Mesa Freedreno Turnip + Zink (MESA_LOADER_DRIVER_OVERRIDE=zink, TU_DEBUG=noconform)
+#   sw     Software fallback (LIBGL_ALWAYS_SOFTWARE=1 + Hyprland blur disabled)
+#
+# Usage:
+#   razr-gpu-mode [hw|sw|toggle|status|env]
+
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}"
+MODE_FILE="${CONFIG_DIR}/razr-gpu-mode"
+ENV_FILE="${CONFIG_DIR}/razr-gpu-mode.env"
+
+read_mode() {
+    if [[ -f "${MODE_FILE}" ]]; then
+        local val
+        val="$(tr -d '[:space:]' < "${MODE_FILE}")"
+        if [[ "${val}" == "hw" || "${val}" == "sw" ]]; then
+            printf '%s\n' "${val}"
+            return 0
+        fi
+    fi
+    printf 'hw\n'
+}
+
+emit_env() {
+    local mode="$1"
+    if [[ "${mode}" == "sw" ]]; then
+        cat <<'EOF'
+export RAZR_GPU_MODE=sw
+export LIBGL_ALWAYS_SOFTWARE=1
+export WLR_RENDERER_ALLOW_SOFTWARE=1
+export RAZR_HYPR_BLUR=0
+unset MESA_LOADER_DRIVER_OVERRIDE
+unset TU_DEBUG
+EOF
+    else
+        cat <<'EOF'
+export RAZR_GPU_MODE=hw
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+export TU_DEBUG=noconform
+export RAZR_HYPR_BLUR=1
+unset LIBGL_ALWAYS_SOFTWARE
+unset WLR_RENDERER_ALLOW_SOFTWARE
+EOF
+    fi
+}
+
+apply_live_hyprland_blur() {
+    local mode="$1"
+    if ! command -v hyprctl >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! hyprctl version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [[ "${mode}" == "sw" ]]; then
+        hyprctl keyword decoration:blur:enabled false >/dev/null 2>&1 || true
+    else
+        hyprctl keyword decoration:blur:enabled true >/dev/null 2>&1 || true
+    fi
+}
+
+set_mode() {
+    local mode="$1"
+    mkdir -p "${CONFIG_DIR}"
+    printf '%s\n' "${mode}" > "${MODE_FILE}"
+    emit_env "${mode}" > "${ENV_FILE}"
+    apply_live_hyprland_blur "${mode}"
+
+    if [[ "${mode}" == "hw" ]]; then
+        printf 'GPU mode set to: hw (Mesa Freedreno Turnip + Zink: MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform)\n'
+    else
+        printf 'GPU mode set to: sw (Software rendering: LIBGL_ALWAYS_SOFTWARE=1, Hyprland blur disabled)\n'
+    fi
+    printf 'Persisted to %s (restart razr-desktop.sh / Hyprland to apply to the active session).\n' "${MODE_FILE}"
+}
+
+show_status() {
+    local mode
+    mode="$(read_mode)"
+    printf 'Current GPU mode: %s (%s)\n' "${mode}" "${MODE_FILE}"
+    emit_env "${mode}"
+}
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [hw|sw|toggle|status|env]
+
+Commands:
+  hw      Enable Adreno Turnip + Zink hardware acceleration
+  sw      Enable software rendering (LIBGL_ALWAYS_SOFTWARE=1) and disable Hyprland blur
+  toggle  Switch between hw and sw
+  status  Show persisted mode and environment variables (default)
+  env     Print shell export/unset statements (for: eval "\$(razr-gpu-mode env)")
+EOF
+}
+
+main() {
+    local cmd="${1:-status}"
+    case "${cmd}" in
+        hw|sw)
+            set_mode "${cmd}"
+            ;;
+        toggle)
+            if [[ "$(read_mode)" == "hw" ]]; then
+                set_mode "sw"
+            else
+                set_mode "hw"
+            fi
+            ;;
+        status)
+            show_status
+            ;;
+        env)
+            emit_env "$(read_mode)"
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            usage >&2
+            printf 'ERROR: unknown argument: %s\n' "${cmd}" >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,5 +1,5 @@
-# Encrypted, deduplicated restic backup of m2air's irreplaceable state to Google Drive
-# (`gdrive:01 — Backups & Infra/m2air-restic`), next to spark's `spark-memory-restic`.
+# Encrypted, deduplicated restic backup of a host's irreplaceable state to Google Drive
+# (`gdrive:01 — Backups & Infra/<host>-restic`), next to spark's `spark-memory-restic`.
 #
 # Zero-Rebuild policy: nothing that can be re-cloned or rebuilt is uploaded.
 #   - Git repositories are skipped as directories (`--exclude-if-present .git`); their
@@ -8,8 +8,9 @@
 #     of remotes to re-clone from.
 #   - Caches, build outputs, cloud mounts and the Wallpapers checkout are excluded.
 #
-# Runs daily on AC power (catching up after sleep), keeps 7 daily, 4 weekly and 12
-# monthly snapshots, and verifies the repository plus a test restore every month.
+# Runs daily on AC power (or, in container guests like `razr`, only while charging on
+# unmetered Wi-Fi, catching up after sleep), keeps 7 daily, 4 weekly and 12 monthly
+# snapshots, and verifies the repository plus a test restore every month.
 # The password comes from sops (`restic_password`), its offline copy in Bitwarden.
 #
 #   backup now | status | snapshots | restore <path> [target] | mount <dir>
@@ -22,7 +23,10 @@
 }:
 let
   home = config.home.homeDirectory;
-  repository = "rclone:gdrive:01 — Backups & Infra/m2air-restic";
+  hostName = osConfig.networking.hostName or "m2air";
+  isContainer = osConfig.boot.isContainer or false;
+  serviceName = "restic-backups-${hostName}";
+  repository = "rclone:gdrive:01 — Backups & Infra/${hostName}-restic";
   passwordFile = osConfig.sops.secrets.restic_password.path or null;
   enabled = passwordFile != null;
   stateDir = "${config.xdg.stateHome}/backup";
@@ -150,9 +154,40 @@ let
   resticEnv = ''
     export RESTIC_REPOSITORY=${lib.escapeShellArg repository}
     export RESTIC_PASSWORD_FILE=${lib.escapeShellArg (toString passwordFile)}
-    export RESTIC_CACHE_DIR="''${XDG_CACHE_HOME:-$HOME/.cache}/restic-backups-m2air"
+    export RESTIC_CACHE_DIR="''${XDG_CACHE_HOME:-$HOME/.cache}/${serviceName}"
     export PATH=${lib.makeBinPath [ pkgs.rclone ]}:$PATH
   '';
+
+  # Phone/container guests (e.g. `razr`) share Android's kernel and network namespace:
+  # skip scheduled runs unless USB/wireless power is online AND the default route uses
+  # unmetered Wi-Fi (`wlan*`, never `rmnet*` mobile data).
+  containerBackupCondition = pkgs.writeShellApplication {
+    name = "backup-container-condition";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
+      pkgs.iproute2
+    ];
+    text = ''
+      charging=0
+      for ps in /sys/class/power_supply/usb/online /sys/class/power_supply/wireless/online; do
+        if [ -r "$ps" ] && [ "$(cat "$ps" 2>/dev/null || echo 0)" = "1" ]; then
+          charging=1
+          break
+        fi
+      done
+      if [ "$charging" != "1" ]; then
+        echo "backup-container-condition: not charging (usb/wireless offline), skipping" >&2
+        exit 1
+      fi
+
+      route="$(ip route get 1.1.1.1 2>/dev/null || true)"
+      if ! printf '%s\n' "$route" | grep -Eq '\bdev[[:space:]]+wlan[0-9a-zA-Z_-]*\b'; then
+        echo "backup-container-condition: default route is not Wi-Fi ($route), skipping" >&2
+        exit 1
+      fi
+    '';
+  };
 
   backupCli = pkgs.writeShellApplication {
     name = "backup";
@@ -163,10 +198,10 @@ let
     text = ''
       ${resticEnv}
       case "''${1:-status}" in
-        now) exec systemctl --user start --wait restic-backups-m2air.service ;;
+        now) exec systemctl --user start --wait ${serviceName}.service ;;
         status)
           systemctl --user list-timers --no-pager 'restic-*' 'backup-*' || true
-          systemctl --user status --no-pager --lines=5 restic-backups-m2air.service || true
+          systemctl --user status --no-pager --lines=5 ${serviceName}.service || true
           ;;
         snapshots) shift; exec restic snapshots "$@" ;;
         restore)
@@ -209,7 +244,7 @@ in
 
     services.restic = {
       enable = true;
-      backups.m2air = {
+      backups.${hostName} = {
         inherit repository passwordFile paths;
         initialize = true;
         # The monthly `backup-verify` checks the repository; a full check after every
@@ -220,7 +255,7 @@ in
           "--exclude-if-present=.git"
           "--exclude-caches"
           "--one-file-system"
-          "--tag=m2air"
+          "--tag=${hostName}"
         ];
         extraOptions = [ "rclone.program=${pkgs.rclone}/bin/rclone" ];
         backupPrepareCommand = lib.getExe gitDeltas;
@@ -228,7 +263,7 @@ in
           "--keep-daily 7"
           "--keep-weekly 4"
           "--keep-monthly 12"
-          "--tag m2air"
+          "--tag ${hostName}"
         ];
         timerConfig = {
           OnCalendar = "daily";
@@ -239,27 +274,40 @@ in
       };
     };
 
-    # Never start on battery; the timer is Persistent, so a missed run catches up on AC.
-    systemd.user.services.restic-backups-m2air.Unit = {
-      ConditionACPower = true;
-      After = [ "network-online.target" ];
+    # Never start on battery (or mobile data in phone containers); the timer is Persistent,
+    # so a missed run catches up once charging (and on Wi-Fi).
+    systemd.user.services.${serviceName} = {
+      Unit = {
+        After = [ "network-online.target" ];
+      }
+      // lib.optionalAttrs (!isContainer) {
+        ConditionACPower = true;
+      };
+    }
+    // lib.optionalAttrs isContainer {
+      Service.ExecCondition = lib.getExe containerBackupCondition;
     };
 
     systemd.user.services.backup-verify = {
       Unit = {
-        Description = "Monthly restic repository check and test restore (m2air)";
-        ConditionACPower = true;
+        Description = "Monthly restic repository check and test restore (${hostName})";
         After = [ "network-online.target" ];
+      }
+      // lib.optionalAttrs (!isContainer) {
+        ConditionACPower = true;
       };
       Service = {
         Type = "oneshot";
         ExecStart = lib.getExe verify;
         Nice = 10;
         IOSchedulingClass = "idle";
+      }
+      // lib.optionalAttrs isContainer {
+        ExecCondition = lib.getExe containerBackupCondition;
       };
     };
     systemd.user.timers.backup-verify = {
-      Unit.Description = "Monthly restic repository check and test restore (m2air)";
+      Unit.Description = "Monthly restic repository check and test restore (${hostName})";
       Timer = {
         OnCalendar = "monthly";
         RandomizedDelaySec = "6h";

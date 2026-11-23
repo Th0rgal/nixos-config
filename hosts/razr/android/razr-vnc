@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Connect to Razr NixOS desktop over Wi-Fi SSH, auto-starting the desktop if needed.
+set -euo pipefail
+
+RAZR_HOST="${RAZR_HOST:-192.168.110.36}"
+RAZR_PORT="${RAZR_PORT:-2222}"
+LOCAL_PORT="${LOCAL_PORT:-5901}"
+
+# Ensure SSH tunnel to 127.0.0.1:5900 is up
+if ! ss -tln 2>/dev/null | grep -q ":${LOCAL_PORT} "; then
+    ssh -fNL "${LOCAL_PORT}:127.0.0.1:5900" -p "$RAZR_PORT" "thomas@${RAZR_HOST}"
+fi
+
+# Verify wayvnc is listening inside Razr; if not, kick off a clean start
+if ! ssh -p "$RAZR_PORT" "thomas@${RAZR_HOST}" 'ss -tln 2>/dev/null | grep -q ":5900 "' ; then
+    echo "Razr desktop not listening on :5900 — starting desktop..."
+    if command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
+        adb shell 'su -c "/data/local/nixos/bin/sidesystem-ctl desktop start"'
+    else
+        ssh -p "$RAZR_PORT" "thomas@${RAZR_HOST}" '
+            [ -x /tmp/sidesystem-desktop-start.sh ] && /bin/sh /tmp/sidesystem-desktop-start.sh 2560x1440@60Hz 1 sw 5900
+        '
+    fi
+    sleep 2
+fi
+
+exec nix run nixpkgs#tigervnc -- "$@" "127.0.0.1:${LOCAL_PORT}"

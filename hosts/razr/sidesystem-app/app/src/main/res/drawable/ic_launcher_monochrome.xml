@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Monochrome themed icon silhouette -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M37,32 L71,32 C76,32 80,36 80,41 L80,67 C80,72 76,76 71,76 L37,76 C32,76 28,72 28,67 L28,41 C28,36 32,32 37,32 Z"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FFFFFFFF" />
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M35,39 L40,39 C41.1,39 42,39.9 42,41 L42,67 C42,68.1 41.1,69 40,69 L35,69 C33.9,69 33,68.1 33,67 L33,41 C33,39.9 33.9,39 35,39 Z" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M51,48.5 L58,54 L51,59.5"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M61.5,59.5 L68.5,59.5"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round" />
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M68,44 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0" />
+</vector>

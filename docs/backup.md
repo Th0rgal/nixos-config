@@ -1,12 +1,13 @@
-# m2air backup and restore
+# Host backup and restore (`m2air` & `razr`)
 
-Declared in [`home/modules/backup.nix`](../home/modules/backup.nix).
+Declared in [`home/modules/backup.nix`](../home/modules/backup.nix), parameterized by `networking.hostName` (`<host>-restic`).
 
 | | |
 | :--- | :--- |
-| Repository | `rclone:gdrive:01 — Backups & Infra/m2air-restic` (restic, AES-256, next to spark's `spark-memory-restic`) |
+| Repository | `rclone:gdrive:01 — Backups & Infra/<host>-restic` (`m2air-restic` on `m2air`, `razr-restic` on `razr`; restic, AES-256, next to spark's `spark-memory-restic`) |
 | Password | sops secret `restic_password` → `/run/secrets/restic_password`; offline copy in the Bitwarden personal vault |
-| Schedule | daily on AC power (`restic-backups-m2air.timer`, catches up after sleep); prune to 7 daily / 4 weekly / 12 monthly |
+| Schedule | daily on AC power (`restic-backups-<host>.timer`, catches up after sleep); prune to 7 daily / 4 weekly / 12 monthly |
+| Container gating (`razr`) | On `boot.isContainer` hosts such as `razr`, `ConditionACPower` is replaced by an `ExecCondition` requiring USB/wireless charging (`/sys/class/power_supply/{usb,wireless}/online == 1`) **and** an unmetered Wi-Fi default route (`wlan*`, never `rmnet*` mobile data) |
 | Verification | monthly `backup-verify.timer`: `restic check --read-data-subset=1/16` plus a test restore |
 | Contents | `~/Notes`, `~/work` (non-git projects only), `~/Pictures`, `~/Downloads`, `~/.ssh`, `~/.gnupg`, `~/.config`, `~/.local/share`, `~/.orb`, shell history, and git deltas |
 | Git deltas | for each repo under `~/work`: unpushed commits and stashes as `unpushed.bundle`, `worktree.patch`, `untracked.tar`, plus `MANIFEST.tsv` of remotes to re-clone |
