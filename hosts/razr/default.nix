@@ -160,8 +160,9 @@ in
   # Mesa Turnip supports Adreno 830 (a8xx):
   #  - Use CPU-native `foot` instead of OpenGL `ghostty` (opens in <30ms vs multi-second shader compile)
   #  - Disable 3-pass Kawase blur, drop shadows, and spring animations (drops Hyprland from ~600% CPU to <5%)
-  #  - Keep VFR enabled so idle CPU stays near 0%
+  #  - Disable hypridle/auto-lock inside container (Android lockscreen already secures the phone, and SELinux blocks unix_chkpwd)
   home-manager.users.thomas = {
+    services.hypridle.enable = lib.mkForce false;
     wayland.windowManager.hyprland = {
       settings.terminal._var = lib.mkForce "${pkgs.foot}/bin/foot";
       extraConfig = lib.mkAfter ''
@@ -172,7 +173,6 @@ in
             shadow = { enabled = false },
           },
           animations = { enabled = false },
-          misc = { vfr = true },
         })
       '';
     };

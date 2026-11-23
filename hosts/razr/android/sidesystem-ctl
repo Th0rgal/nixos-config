@@ -622,7 +622,6 @@ hl.config({
     shadow = { enabled = false },
   },
   animations = { enabled = false },
-  misc = { vfr = true },
 })
 PERFLUA
         rm -f "$HYPR_LUA"
