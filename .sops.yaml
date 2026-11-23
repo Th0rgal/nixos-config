@@ -1,10 +1,16 @@
 # Recipients for secrets/*.yaml. Written by scripts/bootstrap-secrets.sh.
 keys:
   - &m2air age1ptfrfd3d3drj2qyxs6jgevv7h40hvjdvgqxgfv734lxwzpz9ggrqznkqgl
+  - &razr age14llz6wuds7dd098yjyvqag8x3srr2q9faufhxqu98z0xthrzq4vs0rjrfy
   - &backup age1lx57tf0tnmcc32lptrdvk72727hg0jstvg6t5gelw296x7vh6cnskh6mnl
 creation_rules:
   - path_regex: secrets/m2air\.yaml$
     key_groups:
       - age:
           - *m2air
+          - *backup
+  - path_regex: secrets/razr\.yaml$
+    key_groups:
+      - age:
+          - *razr
           - *backup

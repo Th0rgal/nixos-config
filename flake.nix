@@ -109,6 +109,13 @@
         # The same screenshot desktop on the Mac's architecture and on x86 cloud workers.
         vm = mkTestVM "aarch64-linux";
         vm-x86_64 = mkTestVM "x86_64-linux";
+
+        # Motorola Razr 60 Ultra — full Omarchnix desktop inside an Android Linux container.
+        razr = mkPersonalHost {
+          platform = "container";
+          system = "aarch64-linux";
+          modules = [ ./hosts/razr ];
+        };
       };
 
       formatter = forAllSystems (
