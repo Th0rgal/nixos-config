@@ -1,0 +1,30 @@
+--- a/src/backend/Headless.cpp	2026-11-23 20:02:03.314546205 +0000
++++ b/src/backend/Headless.cpp	2026-11-23 20:02:03.337892882 +0000
+@@ -130,12 +130,25 @@
+     return {makeShared<SPollFD>(timers.timerfd.get(), [this]() { dispatchTimers(); })};
+ }
+ 
++static int getHeadlessDrmFD() {
++    static int cachedFd = -2;
++    if (cachedFd != -2)
++        return cachedFd;
++    const char* node = getenv("AQ_HEADLESS_DRM_NODE");
++    if (node && *node) {
++        cachedFd = open(node, O_RDWR | O_CLOEXEC);
++    } else {
++        cachedFd = -1;
++    }
++    return cachedFd;
++}
++
+ int Aquamarine::CHeadlessBackend::drmFD() {
+-    return -1;
++    return getHeadlessDrmFD();
+ }
+ 
+ int Aquamarine::CHeadlessBackend::drmRenderNodeFD() {
+-    return -1;
++    return getHeadlessDrmFD();
+ }
+ 
+ bool Aquamarine::CHeadlessBackend::dispatchEvents() {

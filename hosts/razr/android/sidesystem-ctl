@@ -221,6 +221,50 @@ read_gpu_pct() {
     fi
 }
 
+read_thermals_and_power() {
+    SOC_TEMP_C=0
+    BATT_TEMP_C=0
+    POWER_MW=0
+    NPU_READY="false"
+
+    # Peak across Oryon CPU, Adreno 830 GPU, and Hexagon V79 HVX/HMX sensors (millidegrees C)
+    peak_mc=0
+    for tz in /sys/class/thermal/thermal_zone22/temp /sys/class/thermal/thermal_zone32/temp /sys/class/thermal/thermal_zone48/temp /sys/class/thermal/thermal_zone51/temp; do
+        if [ -r "$tz" ]; then
+            t="$(tr -dc '0-9' < "$tz" 2>/dev/null || true)"
+            if is_uint "$t" && [ "$t" -gt "$peak_mc" ]; then
+                peak_mc="$t"
+            fi
+        fi
+    done
+    [ "$peak_mc" -gt 0 ] && SOC_TEMP_C=$((peak_mc / 1000))
+
+    # Battery / flip_battery temp (millidegrees C)
+    batt_mc=0
+    for tz in /sys/class/thermal/thermal_zone66/temp /sys/class/thermal/thermal_zone67/temp; do
+        if [ -r "$tz" ]; then
+            t="$(tr -dc '0-9' < "$tz" 2>/dev/null || true)"
+            if is_uint "$t" && [ "$t" -gt "$batt_mc" ]; then
+                batt_mc="$t"
+            fi
+        fi
+    done
+    [ "$batt_mc" -gt 0 ] && BATT_TEMP_C=$((batt_mc / 1000))
+
+    # Instantaneous battery power in milliwatts (|uV * uA| / 1e9)
+    if [ -r /sys/class/power_supply/battery/voltage_now ] && [ -r /sys/class/power_supply/battery/current_now ]; then
+        uv="$(tr -dc '0-9' < /sys/class/power_supply/battery/voltage_now 2>/dev/null || true)"
+        ua="$(tr -dc '0-9' < /sys/class/power_supply/battery/current_now 2>/dev/null || true)"
+        if is_uint "$uv" && is_uint "$ua"; then
+            POWER_MW=$(( (uv / 1000) * (ua / 1000) / 1000 ))
+        fi
+    fi
+
+    if [ -c /dev/fastrpc-cdsp ] && [ -r /vendor/dsp/cdsp/fastrpc_shell_unsigned_3 ]; then
+        NPU_READY="true"
+    fi
+}
+
 detect_network() {
     NET_TYPE="offline"
     NET_IP=""
@@ -277,6 +321,7 @@ cmd_status() {
     read_memory_mb
     read_cpu_pct
     read_gpu_pct
+    read_thermals_and_power
     detect_network
 
     c_running="false"
@@ -334,7 +379,7 @@ EOF
         bt_hid_val="true"
     fi
 
-    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"soc_temp_c":%s,"batt_temp_c":%s,"power_mw":%s,"npu_ready":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
         "$c_running" \
         "$c_pid" \
         "$(json_escape "$c_uptime")" \
@@ -351,6 +396,10 @@ EOF
         "$MEM_TOTAL_MB" \
         "$CPU_PCT" \
         "$GPU_PCT" \
+        "$SOC_TEMP_C" \
+        "$BATT_TEMP_C" \
+        "$POWER_MW" \
+        "$NPU_READY" \
         "$(json_escape "$PROFILE")" \
         "$autostart_val" \
         "$(json_escape "$GPU_MODE")" \
@@ -535,15 +584,18 @@ SCALE="$2"
 GPU_MODE="$3"
 VNC_PORT="$4"
 
-export PATH="/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
+export PATH="${HOME}/.local/bin:/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
 export XDG_RUNTIME_DIR="/tmp/xdg-razr"
 
 # Clean up any previous desktop stack (match wrapped binaries like .Hyprland-wrapped too).
-for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+# Also mask/stop hypridle so headless VNC outputs are never DPMS-blanked or auto-locked behind Android's lockscreen.
+systemctl --user stop hypridle.service 2>/dev/null || true
+systemctl --user mask hypridle.service 2>/dev/null || true
+for proc in hypridle hyprlock wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
     pkill -TERM -f "$proc" 2>/dev/null || true
 done
 sleep 1
-for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
+for proc in hypridle hyprlock wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
     pkill -KILL -f "$proc" 2>/dev/null || true
 done
 
@@ -603,75 +655,132 @@ else
     unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
-# Launch headless sway (uses Adreno 830 Zink+Turnip when gpu=hw, or llvmpipe when gpu=sw).
-WLR_BACKENDS=headless \
-WLR_LIBINPUT_NO_DEVICES=1 \
-WLR_RENDERER_ALLOW_SOFTWARE=1 \
-    nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
-
-SWAY_SOCK=""
-i=0
-while [ "$i" -lt 50 ]; do
-    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
-        case "$s" in
-            *.lock) continue ;;
-        esac
-        if [ -S "$s" ]; then
-            SWAY_SOCK="$(basename "$s")"
-            break
-        fi
-    done
-    [ -n "$SWAY_SOCK" ] && break
-    sleep 0.2
-    i=$((i + 1))
-done
-
-if [ -z "$SWAY_SOCK" ]; then
-    echo "ERROR: headless sway Wayland socket did not appear" >&2
-    exit 1
-fi
-
-# Launch Hyprland nested on sway's Wayland socket via start-hyprland (avoids startup warning banner).
+# Launch Hyprland directly in native Aquamarine headless mode (ZERO outer sway, ZERO llvmpipe!)
+# when gpu=hw and patched aquamarine-razr (AQ_HEADLESS_DRM_NODE) is available; otherwise fall
+# back cleanly to headless sway + nested Hyprland.
+AQ_RAZR_LIB="$(ls -1 /nix/store/*-aquamarine-razr-*/lib/libaquamarine.so.* 2>/dev/null | head -n 1)"
 HYPR_LAUNCHER="Hyprland"
 if command -v start-hyprland >/dev/null 2>&1; then
     HYPR_LAUNCHER="start-hyprland"
 fi
-WAYLAND_DISPLAY="$SWAY_SOCK" \
-XDG_SESSION_TYPE=wayland \
-XDG_CURRENT_DESKTOP=Hyprland \
-    nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
 
+SWAY_SOCK=""
 HYPR_SIG=""
 HYPR_SOCK=""
-i=0
-while [ "$i" -lt 60 ]; do
-    for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
-        if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
-            HYPR_SIG="$(basename "$d")"
-            break
-        fi
-    done
-    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
-        case "$s" in
-            *.lock) continue ;;
-        esac
-        bn="$(basename "$s")"
-        if [ -S "$s" ] && [ "$bn" != "$SWAY_SOCK" ]; then
-            HYPR_SOCK="$bn"
-            break
-        fi
-    done
-    [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
-    sleep 0.25
-    i=$((i + 1))
-done
+DIRECT_HEADLESS=0
 
-if [ -z "$HYPR_SIG" ]; then
-    echo "ERROR: Hyprland IPC did not appear" >&2
-    exit 1
-fi
-if [ -z "$HYPR_SOCK" ]; then
-    HYPR_SOCK="$SWAY_SOCK"
+if [ "$GPU_MODE" = "hw" ] && [ -n "$AQ_RAZR_LIB" ] && [ -r "$AQ_RAZR_LIB" ]; then
+    DIRECT_HEADLESS=1
+    unset WAYLAND_DISPLAY DISPLAY
+    AQ_HEADLESS_DRM_NODE=/dev/dri/renderD128 \
+    LD_PRELOAD="$AQ_RAZR_LIB" \
+    XDG_SESSION_TYPE=wayland \
+    XDG_CURRENT_DESKTOP=Hyprland \
+        nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 60 ]; do
+        for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
+            if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
+                HYPR_SIG="$(basename "$d")"
+                break
+            fi
+        done
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            if [ -S "$s" ]; then
+                HYPR_SOCK="$(basename "$s")"
+                break
+            fi
+        done
+        [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
+        sleep 0.25
+        i=$((i + 1))
+    done
+
+    if [ -z "$HYPR_SIG" ] || [ -z "$HYPR_SOCK" ]; then
+        echo "ERROR: Standalone headless Hyprland IPC did not appear" >&2
+        exit 1
+    fi
+
+    export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
+    export WAYLAND_DISPLAY="$HYPR_SOCK"
+    hyprctl output create headless HEADLESS-1 >/dev/null 2>&1 || true
+    hyprctl eval "hl.monitor({ output = \"HEADLESS-1\", mode = \"${SWAY_RES}\", position = \"0x0\", scale = \"${SCALE}\" })" >/dev/null 2>&1 || true
+    SWAY_SOCK="$HYPR_SOCK"
+else
+    # Fallback: headless sway with llvmpipe + nested Hyprland.
+    env -u MESA_LOADER_DRIVER_OVERRIDE -u ZINK_KGSL_FALLBACK -u TU_DEBUG \
+        -u VK_ICD_FILENAMES -u LIBGL_DRIVERS_PATH -u GBM_BACKENDS_PATH -u __EGL_VENDOR_LIBRARY_FILENAMES \
+        LIBGL_ALWAYS_SOFTWARE=1 \
+        GALLIUM_DRIVER=llvmpipe \
+        WLR_BACKENDS=headless \
+        WLR_LIBINPUT_NO_DEVICES=1 \
+        WLR_RENDERER_ALLOW_SOFTWARE=1 \
+        nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 50 ]; do
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            if [ -S "$s" ]; then
+                SWAY_SOCK="$(basename "$s")"
+                break
+            fi
+        done
+        [ -n "$SWAY_SOCK" ] && break
+        sleep 0.2
+        i=$((i + 1))
+    done
+
+    if [ -z "$SWAY_SOCK" ]; then
+        echo "ERROR: headless sway Wayland socket did not appear" >&2
+        exit 1
+    fi
+
+    WAYLAND_DISPLAY="$SWAY_SOCK" \
+    XDG_SESSION_TYPE=wayland \
+    XDG_CURRENT_DESKTOP=Hyprland \
+        nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 60 ]; do
+        for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
+            if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
+                HYPR_SIG="$(basename "$d")"
+                break
+            fi
+        done
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            bn="$(basename "$s")"
+            if [ -S "$s" ] && [ "$bn" != "$SWAY_SOCK" ]; then
+                HYPR_SOCK="$bn"
+                break
+            fi
+        done
+        [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
+        sleep 0.25
+        i=$((i + 1))
+    done
+
+    if [ -z "$HYPR_SIG" ]; then
+        echo "ERROR: Hyprland IPC did not appear" >&2
+        exit 1
+    fi
+    if [ -z "$HYPR_SOCK" ]; then
+        HYPR_SOCK="$SWAY_SOCK"
+    fi
+
+    export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
+    export WAYLAND_DISPLAY="$HYPR_SOCK"
+    hyprctl keyword monitor "WAYLAND-1,preferred,0x0,${SCALE}" >/dev/null 2>&1 || true
 fi
 
 # Persist live Wayland/Hyprland session environment for clipboard and helper tools.
@@ -681,6 +790,7 @@ DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
 SWAY_DISPLAY=${SWAY_SOCK}
 WAYLAND_DISPLAY=${HYPR_SOCK}
 HYPRLAND_INSTANCE_SIGNATURE=${HYPR_SIG}
+DIRECT_HEADLESS=${DIRECT_HEADLESS}
 MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-}
 GALLIUM_DRIVER=${GALLIUM_DRIVER:-}
 ZINK_KGSL_FALLBACK=${ZINK_KGSL_FALLBACK:-}
@@ -691,16 +801,11 @@ __EGL_VENDOR_LIBRARY_FILENAMES=${__EGL_VENDOR_LIBRARY_FILENAMES:-}
 TU_DEBUG=${TU_DEBUG:-}
 ENVEOF
 
-export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
-export WAYLAND_DISPLAY="$HYPR_SOCK"
-
-# Configure nested monitor scale.
-hyprctl keyword monitor "WAYLAND-1,preferred,0x0,${SCALE}" >/dev/null 2>&1 || true
-
-# Launch Omarchy shell bar & plugins.
+# Launch Omarchy shell bar & plugins (and ensure hypridle stays stopped so VNC never auto-locks).
 if command -v omarchy-launch-shell >/dev/null 2>&1; then
     nohup omarchy-launch-shell >"${XDG_RUNTIME_DIR}/omarchy-shell.log" 2>&1 </dev/null &
 fi
+(sleep 3; pkill -9 hypridle 2>/dev/null || true) >/dev/null 2>&1 </dev/null &
 
 # Launch wallpaper via swaybg ONLY if the per-Space workspace-wallpapers plugin is not installed.
 if [ ! -f "${HOME}/.config/omarchy/workspace-wallpapers.json" ] && command -v swaybg >/dev/null 2>&1; then
@@ -721,10 +826,33 @@ if [ ! -f "${HOME}/.config/omarchy/workspace-wallpapers.json" ] && command -v sw
     fi
 fi
 
-# Launch wayvnc attached to headless sway's Wayland socket on 127.0.0.1:<VNC_PORT>.
-# -r renders the Wayland cursor into the stream so BT mouse & remote pointer stay visible.
+# Launch wayvnc (serves local Wayland virtual input injection + optional VNC fallback).
 WAYLAND_DISPLAY="$SWAY_SOCK" \
-    nohup wayvnc -r 127.0.0.1 "$VNC_PORT" >"${XDG_RUNTIME_DIR}/wayvnc.log" 2>&1 </dev/null &
+    nohup wayvnc -r -f 60 127.0.0.1 "$VNC_PORT" >"${XDG_RUNTIME_DIR}/wayvnc.log" 2>&1 </dev/null &
+
+# Launch Sunshine (ultra-low-latency UDP H.264/HEVC streaming for Moonlight clients).
+SUNSHINE_BIN="$(command -v sunshine 2>/dev/null || ls -1 /nix/store/*-sunshine-*/bin/sunshine 2>/dev/null | head -n 1 || true)"
+if [ -n "$SUNSHINE_BIN" ] && [ -x "$SUNSHINE_BIN" ]; then
+    mkdir -p "${HOME}/.config/sunshine"
+    if [ ! -f "${HOME}/.config/sunshine/sunshine.conf" ]; then
+        cat > "${HOME}/.config/sunshine/sunshine.conf" <<SUNEOF
+capture = wlr
+encoder = software
+sw_preset = ultrafast
+sw_tune = zerolatency
+min_threads = 4
+qp = 22
+lan_encryption_mode = 0
+fec_percentage = 5
+upnp = disabled
+origin_web_ui_allowed = lan
+sunshine_name = Razr-SideSystem
+min_log_level = info
+SUNEOF
+    fi
+    WAYLAND_DISPLAY="$HYPR_SOCK" \
+        nohup "$SUNSHINE_BIN" "${HOME}/.config/sunshine/sunshine.conf" >"${XDG_RUNTIME_DIR}/sunshine.log" 2>&1 </dev/null &
+fi
 
 exit 0
 EOF
@@ -735,6 +863,12 @@ EOF
         || die "Failed to start desktop session inside container"
 
     ensure_container_hw_bridge
+    # Ensure Sunshine uinput -> Wayland input bridge is running (works completely cable-free!)
+    if [ -x "${BASE_DIR}/bin/bt-hid-bridge" ]; then
+        killall bt-hid-bridge 2>/dev/null || true
+        sleep 0.2
+        setsid "${BASE_DIR}/bin/bt-hid-bridge" --sunshine "$VNC_PORT" >"${BASE_DIR}/sunshine-input.log" 2>&1 </dev/null &
+    fi
     apply_profile_live "$PROFILE" || true
     log "Desktop started (${DISPLAY_MODE}, scale=${DISPLAY_SCALE}, gpu=${GPU_MODE}, profile=${PROFILE}, VNC 127.0.0.1:${VNC_PORT})."
 }
@@ -759,38 +893,126 @@ ensure_container_hw_bridge() {
         return 0
     fi
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
-        mkdir -p /run/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
-        chmod 755 /run/sidesystem
-        touch /run/sidesystem/power-profile /run/sidesystem/power-profile-req
-        chmod 644 /run/sidesystem/power-profile
-        chmod 666 /run/sidesystem/power-profile-req
+        mkdir -p /var/lib/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
+        chmod 755 /var/lib/sidesystem
+        touch /var/lib/sidesystem/power-profile /var/lib/sidesystem/power-profile-req /var/lib/sidesystem/bio-req /var/lib/sidesystem/bio-resp
+        chmod 644 /var/lib/sidesystem/power-profile
+        chmod 666 /var/lib/sidesystem/power-profile-req /var/lib/sidesystem/bio-req /var/lib/sidesystem/bio-resp
+        cat > /var/lib/sidesystem/sidesystem-touchid-auth <<'\''TIDEOF'\''
+#!/bin/sh
+# PAM pam_exec helper: requests hardware-backed Touch ID signature from SideSystem on Android.
+set -eu
+export PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+REQ="/var/lib/sidesystem/bio-req"
+RESP="/var/lib/sidesystem/bio-resp"
+PUB="/var/lib/sidesystem/touchid.pub"
+[ -w "$REQ" ] || exit 1
+nonce="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d '\'' \n'\'')"
+reason="NixOS ${PAM_SERVICE:-sudo} (${PAM_USER:-thomas})"
+: > "$RESP" 2>/dev/null || true
+printf "%s|%s\n" "$nonce" "$reason" > "$REQ"
+i=0
+line=""
+while [ "$i" -lt 120 ]; do
+    if [ -s "$RESP" ]; then
+        line="$(head -n 1 "$RESP" 2>/dev/null | tr -d '\''\r'\'')"
+        : > "$RESP" 2>/dev/null || true
+        break
+    fi
+    sleep 0.25
+    i=$((i + 1))
+done
+case "$line" in
+    "OK ${nonce} "*)
+        sig_b64="${line#OK ${nonce} }"
+        if [ -r "$PUB" ] && command -v openssl >/dev/null 2>&1; then
+            tmpd="$(mktemp -d)"
+            trap '\''rm -rf "$tmpd"'\'' EXIT
+            {
+                echo "-----BEGIN PUBLIC KEY-----"
+                cat "$PUB"
+                echo "-----END PUBLIC KEY-----"
+            } > "$tmpd/pub.pem"
+            printf "%s" "$sig_b64" | openssl base64 -d -A > "$tmpd/sig.der" 2>/dev/null || exit 1
+            printf "%s" "$nonce" | openssl dgst -sha256 -verify "$tmpd/pub.pem" -signature "$tmpd/sig.der" >/dev/null 2>&1 || exit 1
+        fi
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+TIDEOF
+        chmod 755 /var/lib/sidesystem/sidesystem-touchid-auth
         [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
         [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
-        chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure 2>/dev/null || true
+        [ -c /dev/uinput ] || mknod -m 666 /dev/uinput c 10 223 2>/dev/null || true
+        chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure /dev/uinput 2>/dev/null || true
     ' >/dev/null 2>&1 || true
 
-    # Start lightweight host-side power-profile request watcher so Omarchy Shell top bar
-    # can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
-    if ! pgrep -f "sidesystem-powerd" >/dev/null 2>&1; then
-        cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
+    # Start single-instance host-side power-profile request watcher on shared F2FS /var/lib/sidesystem
+    # so Omarchy Shell top bar can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
+    pwrd_pid_file="${BASE_DIR}/powerd.pid"
+    if [ -r "$pwrd_pid_file" ]; then
+        old_pwrd_pid="$(cat "$pwrd_pid_file" 2>/dev/null || true)"
+        if [ -n "$old_pwrd_pid" ] && [ -r "/proc/${old_pwrd_pid}/cmdline" ] && tr '\0' ' ' < "/proc/${old_pwrd_pid}/cmdline" 2>/dev/null | grep -q "sidesystem-powerd"; then
+            return 0
+        fi
+    fi
+    # Clean up any stray copies before starting the single managed instance
+    for p in $(pgrep -f '[s]idesystem-powerd' 2>/dev/null || true); do
+        [ "$p" != "$$" ] && kill "$p" 2>/dev/null || true
+    done
+    cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
 #!/system/bin/sh
-REQ="/data/local/nixos/mnt/run/sidesystem/power-profile-req"
+echo "$$" > /data/local/nixos/powerd.pid
+REQ="/data/local/nixos/mnt/var/lib/sidesystem/power-profile-req"
+BIO_REQ="/data/local/nixos/mnt/var/lib/sidesystem/bio-req"
+PROF_FILE="/data/local/nixos/mnt/var/lib/sidesystem/power-profile"
+tick=0
+thermal_stepped=0
 while true; do
+    if [ -s "$BIO_REQ" ]; then
+        bline="$(head -n 1 "$BIO_REQ" 2>/dev/null | tr -d '\r\n')"
+        : > "$BIO_REQ" 2>/dev/null || true
+        bnonce="${bline%%|*}"
+        breason="${bline#*|}"
+        [ -n "$bnonce" ] && am start -n com.th0rgal.sidesystem/.BiometricAuthActivity \
+            --es nonce "$bnonce" --es reason "${breason:-NixOS authentication}" >/dev/null 2>&1 || true
+    fi
     if [ -s "$REQ" ]; then
         val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
         : > "$REQ" 2>/dev/null || true
+        thermal_stepped=0
         case "$val" in
             power-saver|eco)         /data/local/nixos/bin/sidesystem-ctl profile eco >/dev/null 2>&1 || true ;;
             balanced)                /data/local/nixos/bin/sidesystem-ctl profile balanced >/dev/null 2>&1 || true ;;
             performance|full)        /data/local/nixos/bin/sidesystem-ctl profile full >/dev/null 2>&1 || true ;;
         esac
     fi
-    sleep 1
+    # Closed-loop thermal governor (every 2s): gently feather performance clocks before Qualcomm's cliff throttle
+    tick=$((tick + 1))
+    if [ $((tick % 4)) -eq 0 ]; then
+        cur_prof="$(cat "$PROF_FILE" 2>/dev/null | tr -d '\r\n ')"
+        if [ "$cur_prof" = "performance" ]; then
+            soc_mc="$(cat /sys/class/thermal/thermal_zone22/temp 2>/dev/null || echo 0)"
+            batt_mc="$(cat /sys/class/thermal/thermal_zone67/temp 2>/dev/null || echo 0)"
+            if [ "$thermal_stepped" -eq 0 ] && { [ "${soc_mc:-0}" -ge 80000 ] || [ "${batt_mc:-0}" -ge 40000 ]; }; then
+                printf '3532800\n' > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+                printf '9\n' > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+                thermal_stepped=1
+            elif [ "$thermal_stepped" -eq 1 ] && [ "${soc_mc:-0}" -lt 72000 ] && [ "${batt_mc:-0}" -lt 37000 ]; then
+                printf '4320000\n' > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+                printf '4\n' > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+                thermal_stepped=0
+            fi
+        fi
+    fi
+    sleep 0.5
 done
 PWRD
-        chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
-        nohup "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
-    fi
+    chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
+    setsid "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
 }
 
 apply_profile_live() {
@@ -844,9 +1066,9 @@ apply_profile_live() {
     fi
 
     # 3. Publish active Omarchy profile state & adjust Hyprland Kawase blur passes live
-    ensure_container_hw_bridge
+    mkdir -p "${MNT_DIR}/var/lib/sidesystem" 2>/dev/null || true
+    printf '%s\n' "${omarchy_name}" > "${MNT_DIR}/var/lib/sidesystem/power-profile" 2>/dev/null || true
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c "
-        printf '%s\n' '${omarchy_name}' > /run/sidesystem/power-profile 2>/dev/null || true
         if [ -r /tmp/xdg-razr/session.env ]; then
             /run/current-system/sw/bin/su -s /bin/sh - ${CONTAINER_USER} -c '
                 set -a; . /tmp/xdg-razr/session.env; set +a

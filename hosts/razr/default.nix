@@ -136,45 +136,87 @@ in
   system.stateVersion = "25.05";
 
   environment.systemPackages = with pkgs; [
-    # Pure-Wayland headless host + remote viewer server (`sway` + `wayvnc`), GPU & audio tooling
+    # Pure-Wayland headless streaming (`sunshine` UDP + `wayvnc` input/fallback), GPU & audio tooling
+    sunshine
     sway
     wayvnc
     weston
     cage
     mesa
     # Adreno 830 v2 (/dev/kgsl-3d0) patched Mesa Turnip + Zink (ZINK_KGSL_FALLBACK=1 + KHR_display fix)
-    ((pkgs.mesa.override {
-      galliumDrivers = [ "zink" "llvmpipe" "virgl" ];
-      vulkanDrivers = [ "freedreno" ];
-      vulkanLayers = [];
-    }).overrideAttrs (old: {
-      pname = "mesa-razr-kgsl";
-      patches = (old.patches or []) ++ [ ./patches/mesa-razr-kgsl.patch ];
-      mesonFlags = (builtins.filter (f:
-        !(lib.hasPrefix "-Dgallium-rusticl=" f) &&
-        !(lib.hasPrefix "-Dtools=" f) &&
-        !(lib.hasPrefix "-Dteflon=" f)
-      ) (old.mesonFlags or [])) ++ [
-        "-Dgallium-rusticl=false"
-        "-Dtools="
-        "-Dteflon=false"
-      ];
-      postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
-      postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (old.postFixup or "");
+    (
+      (pkgs.mesa.override {
+        galliumDrivers = [
+          "zink"
+          "llvmpipe"
+          "virgl"
+        ];
+        vulkanDrivers = [ "freedreno" ];
+        vulkanLayers = [ ];
+      }).overrideAttrs
+        (old: {
+          pname = "mesa-razr-kgsl";
+          patches = (old.patches or [ ]) ++ [ ./patches/mesa-razr-kgsl.patch ];
+          mesonFlags =
+            (builtins.filter (
+              f:
+              !(lib.hasPrefix "-Dgallium-rusticl=" f)
+              && !(lib.hasPrefix "-Dtools=" f)
+              && !(lib.hasPrefix "-Dteflon=" f)
+            ) (old.mesonFlags or [ ]))
+            ++ [
+              "-Dgallium-rusticl=false"
+              "-Dtools="
+              "-Dteflon=false"
+            ];
+          postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
+          postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (
+            old.postFixup or ""
+          );
+        })
+    )
+    # Patched Aquamarine enabling pure-GPU standalone headless Hyprland via AQ_HEADLESS_DRM_NODE (zero sway / zero llvmpipe)
+    (pkgs.aquamarine.overrideAttrs (old: {
+      pname = "aquamarine-razr";
+      patches = (old.patches or [ ]) ++ [ ./patches/aquamarine-headless-drm.patch ];
     }))
     vulkan-tools
     mesa-demos
+    (pkgs.llama-cpp.override { vulkanSupport = true; })
+    ffmpeg
     pulseaudio
     android-tools
-    # Shared personal desktop & CLI parity
+    # Shared personal desktop & CLI parity (matches m2air app suite)
     helium
+    orb-desktop
+    telegram-desktop
+    vesktop
+    bitwarden-desktop
+    signal-desktop-frameless
+    folio-desktop
+    rencal
+    murmure
+    age
+    libsecret
     gh
     bun
     restic
     rclone
-    orb-desktop
-    folio-desktop
   ];
+
+  # Hardware-backed Razr side-button Touch ID via SideSystem BiometricPrompt (ECDSA P-256 StrongBox)
+  security.pam.services.sudo.rules.auth.sidesystem-touchid = {
+    order = 11400;
+    control = "sufficient";
+    modulePath = "${pkgs.pam}/lib/security/pam_exec.so";
+    args = [ "quiet" "/var/lib/sidesystem/sidesystem-touchid-auth" ];
+  };
+  security.pam.services.polkit-1.rules.auth.sidesystem-touchid = {
+    order = 11400;
+    control = "sufficient";
+    modulePath = "${pkgs.pam}/lib/security/pam_exec.so";
+    args = [ "quiet" "/var/lib/sidesystem/sidesystem-touchid-auth" ];
+  };
 
   # Keep full 1:1 desktop parity (Ghostty, frosted glass, animations) with m2air;
   # only disable hypridle auto-lock inside the container since Android's lockscreen

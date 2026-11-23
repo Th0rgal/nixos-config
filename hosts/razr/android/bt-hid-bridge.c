@@ -39,10 +39,14 @@ typedef struct {
     int fd;
     char path[64];
     char name[128];
+    int abs_max_x;
+    int abs_max_y;
 } DevEntry;
 
 static DevEntry g_devs[MAX_DEVS];
 static int g_dev_count = 0;
+static int g_sunshine_mode = 0;
+static int g_abs_dirty = 0;
 
 static int g_vnc_fd = -1;
 static int g_fb_w = 1920;
@@ -284,15 +288,22 @@ static void scan_bt_devices(void) {
         int fd = open(path, O_RDONLY | O_NONBLOCK);
         if (fd < 0) continue;
 
-        struct input_id id;
-        memset(&id, 0, sizeof(id));
-        if (ioctl(fd, EVIOCGID, &id) < 0 || id.bustype != BUS_BLUETOOTH) {
-            close(fd);
-            continue;
-        }
-
-        char name[128] = "Bluetooth HID";
+        char name[128] = "HID";
         ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name);
+
+        if (g_sunshine_mode) {
+            if (!strstr(name, "libvirtualhid")) {
+                close(fd);
+                continue;
+            }
+        } else {
+            struct input_id id;
+            memset(&id, 0, sizeof(id));
+            if (ioctl(fd, EVIOCGID, &id) < 0 || id.bustype != BUS_BLUETOOTH) {
+                close(fd);
+                continue;
+            }
+        }
 
         if (ioctl(fd, EVIOCGRAB, (void *)1) < 0) {
             fprintf(stderr, "[bt-hid-bridge] Failed EVIOCGRAB on %s (%s): %s\n", path, name, strerror(errno));
@@ -300,11 +311,18 @@ static void scan_bt_devices(void) {
             continue;
         }
 
+        struct input_absinfo ax, ay;
+        int max_x = 0, max_y = 0;
+        if (ioctl(fd, EVIOCGABS(ABS_X), &ax) == 0 && ax.maximum > 0) max_x = ax.maximum;
+        if (ioctl(fd, EVIOCGABS(ABS_Y), &ay) == 0 && ay.maximum > 0) max_y = ay.maximum;
+
         g_devs[g_dev_count].fd = fd;
+        g_devs[g_dev_count].abs_max_x = max_x;
+        g_devs[g_dev_count].abs_max_y = max_y;
         strncpy(g_devs[g_dev_count].path, path, sizeof(g_devs[g_dev_count].path) - 1);
         strncpy(g_devs[g_dev_count].name, name, sizeof(g_devs[g_dev_count].name) - 1);
         g_dev_count++;
-        fprintf(stderr, "[bt-hid-bridge] Grabbed %s (%s)\n", path, name);
+        fprintf(stderr, "[bt-hid-bridge] Grabbed %s (%s) abs=%dx%d\n", path, name, max_x, max_y);
     }
     closedir(d);
 }
@@ -322,8 +340,25 @@ static void release_all_devs(void) {
     while (g_dev_count > 0) remove_dev(g_dev_count - 1);
 }
 
-static void handle_event(const struct input_event *ev) {
-    if (ev->type == EV_REL) {
+static void handle_event(const DevEntry *dev, const struct input_event *ev) {
+    if (ev->type == EV_ABS) {
+        if (ev->code == ABS_X && dev->abs_max_x > 0) {
+            g_px = ((double)ev->value * (double)(g_fb_w - 1)) / (double)dev->abs_max_x;
+            if (g_px < 0) g_px = 0;
+            if (g_px >= g_fb_w) g_px = g_fb_w - 1;
+            g_abs_dirty = 1;
+        } else if (ev->code == ABS_Y && dev->abs_max_y > 0) {
+            g_py = ((double)ev->value * (double)(g_fb_h - 1)) / (double)dev->abs_max_y;
+            if (g_py < 0) g_py = 0;
+            if (g_py >= g_fb_h) g_py = g_fb_h - 1;
+            g_abs_dirty = 1;
+        }
+    } else if (ev->type == EV_SYN && ev->code == SYN_REPORT) {
+        if (g_abs_dirty) {
+            g_abs_dirty = 0;
+            vnc_send_pointer(g_btn_mask, (int)g_px, (int)g_py);
+        }
+    } else if (ev->type == EV_REL) {
         if (ev->code == REL_X) {
             g_px += (double)ev->value * 1.15;
             if (g_px < 0) g_px = 0;
@@ -367,8 +402,14 @@ static void handle_event(const struct input_event *ev) {
 
 int main(int argc, char **argv) {
     int port = VNC_PORT;
-    if (argc > 1) port = atoi(argv[1]);
-    if (port <= 0) port = VNC_PORT;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--sunshine") == 0) {
+            g_sunshine_mode = 1;
+        } else {
+            int p = atoi(argv[i]);
+            if (p > 0) port = p;
+        }
+    }
 
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -426,7 +467,7 @@ int main(int argc, char **argv) {
                 }
                 int count = (int)(n / (ssize_t)sizeof(struct input_event));
                 for (int k = 0; k < count; k++) {
-                    handle_event(&evs[k]);
+                    handle_event(&g_devs[i], &evs[k]);
                 }
             }
         }
