@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Spawn a terminal (ghostty by default, or `razr-term foot`) inside the Razr Hyprland desktop.
+set -euo pipefail
+
+RAZR_HOST="${RAZR_HOST:-192.168.110.36}"
+RAZR_PORT="${RAZR_PORT:-2222}"
+TERM_BIN="${1:-ghostty}"
+
+ssh -p "$RAZR_PORT" "thomas@${RAZR_HOST}" "
+  set -a
+  . /tmp/xdg-razr/session.env
+  set +a
+  nohup ${TERM_BIN} >/dev/null 2>&1 </dev/null &
+"
+echo "Launched ${TERM_BIN} on Razr desktop."
