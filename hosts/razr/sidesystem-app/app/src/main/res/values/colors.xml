@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="starship_bg">#0D1117</color>
+    <color name="starship_surface">#161B22</color>
+    <color name="starship_accent">#7CC6FE</color>
+</resources>

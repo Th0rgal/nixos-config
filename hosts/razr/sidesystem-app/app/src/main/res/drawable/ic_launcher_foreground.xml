@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer sleek desktop/window frame -->
+    <path
+        android:fillColor="#161B22"
+        android:pathData="M30,31 L78,31 C80.2,31 82,32.8 82,35 L82,69 C82,71.2 80.2,73 78,73 L30,73 C27.8,73 26,71.2 26,69 L26,35 C26,32.8 27.8,31 30,31 Z"
+        android:strokeWidth="2.4"
+        android:strokeColor="#7CC6FE" />
+
+    <!-- Top bar divider -->
+    <path
+        android:pathData="M27,41 L81,41"
+        android:strokeWidth="1.6"
+        android:strokeColor="#2A3240" />
+
+    <!-- Running status dot (mint green) -->
+    <path
+        android:fillColor="#4ADE80"
+        android:pathData="M33,36 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+
+    <!-- Accent dot (ice blue) -->
+    <path
+        android:fillColor="#7CC6FE"
+        android:pathData="M40,36 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+
+    <!-- Stylized tiling panes / SideSystem emblem -->
+    <path
+        android:fillColor="#7CC6FE"
+        android:fillAlpha="0.22"
+        android:pathData="M32,46 L53,46 L53,67 L32,67 Z"
+        android:strokeWidth="1.6"
+        android:strokeColor="#7CC6FE" />
+
+    <!-- Terminal prompt chevron inside left pane -->
+    <path
+        android:pathData="M37,53 L42,56.5 L37,60"
+        android:strokeWidth="2.2"
+        android:strokeColor="#E6EDF3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M44.5,60 L48.5,60"
+        android:strokeWidth="2.2"
+        android:strokeColor="#4ADE80"
+        android:strokeLineCap="round" />
+
+    <!-- Right stacked tiling panes -->
+    <path
+        android:fillColor="#7CC6FE"
+        android:fillAlpha="0.14"
+        android:pathData="M57,46 L76,46 L76,55 L57,55 Z"
+        android:strokeWidth="1.4"
+        android:strokeColor="#7CC6FE" />
+    <path
+        android:fillColor="#4ADE80"
+        android:fillAlpha="0.18"
+        android:pathData="M57,58 L76,58 L76,67 L57,67 Z"
+        android:strokeWidth="1.4"
+        android:strokeColor="#4ADE80" />
+
+    <!-- Subtle stand / dock bar underneath -->
+    <path
+        android:pathData="M44,78 L64,78"
+        android:strokeWidth="2.6"
+        android:strokeColor="#7CC6FE"
+        android:strokeLineCap="round" />
+</vector>
