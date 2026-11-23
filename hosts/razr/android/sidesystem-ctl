@@ -594,6 +594,7 @@ fi
 # Configure GPU environment for nested Hyprland.
 if [ "$GPU_MODE" = "hw" ]; then
     export MESA_LOADER_DRIVER_OVERRIDE=zink
+    export VK_ICD_FILENAMES=/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json
     export TU_DEBUG=noconform
     unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER AQ_NO_MODIFIERS WLR_RENDERER_ALLOW_SOFTWARE
 else
@@ -601,7 +602,33 @@ else
     export GALLIUM_DRIVER=llvmpipe
     export AQ_NO_MODIFIERS=1
     export WLR_RENDERER_ALLOW_SOFTWARE=1
-    unset MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG
+    unset MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+
+    # On llvmpipe software rendering, disable 3-pass Kawase blur/shadows/animations
+    # and default to CPU-native `foot` (opens in ~30ms instead of Ghostty's OpenGL shaders).
+    HYPR_LUA="${HOME}/.config/hypr/hyprland.lua"
+    if [ -e "$HYPR_LUA" ] && ! grep -q "RAZR_SW_PERF_TUNED" "$HYPR_LUA" 2>/dev/null; then
+        FOOT_BIN="$(command -v foot 2>/dev/null || echo /run/current-system/sw/bin/foot)"
+        tmp_lua="/tmp/hyprland-razr-perf.lua"
+        cp -L "$HYPR_LUA" "$tmp_lua"
+        chmod 644 "$tmp_lua"
+        sed -i "s|^local terminal = \".*\"|local terminal = \"${FOOT_BIN}\"|" "$tmp_lua"
+        cat >> "$tmp_lua" <<'PERFLUA'
+
+-- RAZR_SW_PERF_TUNED: disable expensive CPU-bound blur/shadows/animations on llvmpipe
+hl.config({
+  decoration = {
+    blur = { enabled = false, passes = 0 },
+    shadow = { enabled = false },
+  },
+  animations = { enabled = false },
+  misc = { vfr = true },
+})
+PERFLUA
+        rm -f "$HYPR_LUA"
+        mv "$tmp_lua" "$HYPR_LUA"
+        chmod 644 "$HYPR_LUA"
+    fi
 fi
 
 # Launch Hyprland nested on sway's Wayland socket.
