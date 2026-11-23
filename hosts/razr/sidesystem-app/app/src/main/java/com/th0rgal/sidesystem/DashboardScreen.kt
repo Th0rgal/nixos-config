@@ -58,6 +58,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -941,12 +942,14 @@ private fun DockTextPill(
         Text(
             text = label,
             fontFamily = if (monospace) FontFamily.Monospace else FontFamily.SansSerif,
-            fontFeatureSettings = if (monospace) "tnum" else null,
             fontSize = 12.sp,
             lineHeight = 15.sp,
             fontWeight = FontWeight.Medium,
             color = OrbFgStrong,
-            maxLines = 1
+            maxLines = 1,
+            style = LocalTextStyle.current.copy(
+                fontFeatureSettings = if (monospace) "tnum" else null
+            )
         )
     }
 }
