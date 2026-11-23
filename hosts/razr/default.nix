@@ -156,25 +156,10 @@ in
     folio-desktop
   ];
 
-  # Software-renderer (llvmpipe) desktop tuning for Snapdragon 8 Elite until
-  # Mesa Turnip supports Adreno 830 (a8xx):
-  #  - Use CPU-native `foot` instead of OpenGL `ghostty` (opens in <30ms vs multi-second shader compile)
-  #  - Disable 3-pass Kawase blur, drop shadows, and spring animations (drops Hyprland from ~600% CPU to <5%)
-  #  - Disable hypridle/auto-lock inside container (Android lockscreen already secures the phone, and SELinux blocks unix_chkpwd)
+  # Keep full 1:1 desktop parity (Ghostty, frosted glass, animations) with m2air;
+  # only disable hypridle auto-lock inside the container since Android's lockscreen
+  # secures the phone and SELinux blocks unix_chkpwd inside the container.
   home-manager.users.thomas = {
     services.hypridle.enable = lib.mkForce false;
-    wayland.windowManager.hyprland = {
-      settings.terminal._var = lib.mkForce "${pkgs.foot}/bin/foot";
-      extraConfig = lib.mkAfter ''
-        -- Razr llvmpipe performance overrides (applied after Omarchy glassy hooks)
-        hl.config({
-          decoration = {
-            blur = { enabled = false, passes = 0 },
-            shadow = { enabled = false },
-          },
-          animations = { enabled = false },
-        })
-      '';
-    };
   };
 }
