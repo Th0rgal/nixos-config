@@ -603,10 +603,16 @@ else
     unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
-# Launch headless sway (uses Adreno 830 Zink+Turnip when gpu=hw, or llvmpipe when gpu=sw).
-WLR_BACKENDS=headless \
-WLR_LIBINPUT_NO_DEVICES=1 \
-WLR_RENDERER_ALLOW_SOFTWARE=1 \
+# Launch headless sway with llvmpipe (wlroots headless needs GLES2 for nested Wayland clients
+# like Hyprland/Aquamarine, and KGSL does not expose a DRM render node for wlroots dmabuf).
+# Nested Hyprland and all Wayland apps below run full hardware Adreno 830 v2 Zink+Turnip (12 MiB GMEM).
+env -u MESA_LOADER_DRIVER_OVERRIDE -u ZINK_KGSL_FALLBACK -u TU_DEBUG \
+    -u VK_ICD_FILENAMES -u LIBGL_DRIVERS_PATH -u GBM_BACKENDS_PATH -u __EGL_VENDOR_LIBRARY_FILENAMES \
+    LIBGL_ALWAYS_SOFTWARE=1 \
+    GALLIUM_DRIVER=llvmpipe \
+    WLR_BACKENDS=headless \
+    WLR_LIBINPUT_NO_DEVICES=1 \
+    WLR_RENDERER_ALLOW_SOFTWARE=1 \
     nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
 
 SWAY_SOCK=""
@@ -759,22 +765,33 @@ ensure_container_hw_bridge() {
         return 0
     fi
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
-        mkdir -p /run/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
-        chmod 755 /run/sidesystem
-        touch /run/sidesystem/power-profile /run/sidesystem/power-profile-req
-        chmod 644 /run/sidesystem/power-profile
-        chmod 666 /run/sidesystem/power-profile-req
+        mkdir -p /var/lib/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
+        chmod 755 /var/lib/sidesystem
+        touch /var/lib/sidesystem/power-profile /var/lib/sidesystem/power-profile-req
+        chmod 644 /var/lib/sidesystem/power-profile
+        chmod 666 /var/lib/sidesystem/power-profile-req
         [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
         [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
         chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure 2>/dev/null || true
     ' >/dev/null 2>&1 || true
 
-    # Start lightweight host-side power-profile request watcher so Omarchy Shell top bar
-    # can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
-    if ! pgrep -f "sidesystem-powerd" >/dev/null 2>&1; then
-        cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
+    # Start single-instance host-side power-profile request watcher on shared F2FS /var/lib/sidesystem
+    # so Omarchy Shell top bar can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
+    pwrd_pid_file="${BASE_DIR}/powerd.pid"
+    if [ -r "$pwrd_pid_file" ]; then
+        old_pwrd_pid="$(cat "$pwrd_pid_file" 2>/dev/null || true)"
+        if [ -n "$old_pwrd_pid" ] && [ -r "/proc/${old_pwrd_pid}/cmdline" ] && tr '\0' ' ' < "/proc/${old_pwrd_pid}/cmdline" 2>/dev/null | grep -q "sidesystem-powerd"; then
+            return 0
+        fi
+    fi
+    # Clean up any stray copies before starting the single managed instance
+    for p in $(pgrep -f '[s]idesystem-powerd' 2>/dev/null || true); do
+        [ "$p" != "$$" ] && kill "$p" 2>/dev/null || true
+    done
+    cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
 #!/system/bin/sh
-REQ="/data/local/nixos/mnt/run/sidesystem/power-profile-req"
+echo "$$" > /data/local/nixos/powerd.pid
+REQ="/data/local/nixos/mnt/var/lib/sidesystem/power-profile-req"
 while true; do
     if [ -s "$REQ" ]; then
         val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
@@ -785,12 +802,11 @@ while true; do
             performance|full)        /data/local/nixos/bin/sidesystem-ctl profile full >/dev/null 2>&1 || true ;;
         esac
     fi
-    sleep 1
+    sleep 0.5
 done
 PWRD
-        chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
-        nohup "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
-    fi
+    chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
+    setsid "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
 }
 
 apply_profile_live() {
@@ -844,9 +860,9 @@ apply_profile_live() {
     fi
 
     # 3. Publish active Omarchy profile state & adjust Hyprland Kawase blur passes live
-    ensure_container_hw_bridge
+    mkdir -p "${MNT_DIR}/var/lib/sidesystem" 2>/dev/null || true
+    printf '%s\n' "${omarchy_name}" > "${MNT_DIR}/var/lib/sidesystem/power-profile" 2>/dev/null || true
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c "
-        printf '%s\n' '${omarchy_name}' > /run/sidesystem/power-profile 2>/dev/null || true
         if [ -r /tmp/xdg-razr/session.env ]; then
             /run/current-system/sw/bin/su -s /bin/sh - ${CONTAINER_USER} -c '
                 set -a; . /tmp/xdg-razr/session.env; set +a
