@@ -64,9 +64,27 @@ in
     };
   };
 
+  # Clamp Aquamarine's nested Wayland protocol bind versions to what the parent
+  # headless compositor (`sway` / `weston` / `cage`) actually advertises instead
+  # of hardcoding `xdg_wm_base` v6 / `wl_seat` v9.
+  nixpkgs.overlays = [
+    (_final: prev: {
+      aquamarine = prev.aquamarine.overrideAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace src/backend/Wayland.cpp \
+            --replace-fail '&wl_seat_interface, 9)' '&wl_seat_interface, std::min<uint32_t>(version, 9))' \
+            --replace-fail '&xdg_wm_base_interface, 6)' '&xdg_wm_base_interface, std::min<uint32_t>(version, 6))' \
+            --replace-fail '&wl_compositor_interface, 6)' '&wl_compositor_interface, std::min<uint32_t>(version, 6))' \
+            --replace-fail '&zwp_linux_dmabuf_v1_interface, 4)' '&zwp_linux_dmabuf_v1_interface, std::min<uint32_t>(version, 4))'
+        '';
+      });
+    })
+  ];
+
   # Map Android supplementary GIDs so user processes have native access to
   # paranoid networking (`aid_inet`) and GPU/input nodes (`/dev/kgsl-3d0`, `/dev/dri`).
   users.groups = {
+    droidspaces-gpu.gid = 786;
     aid_graphics.gid = 1003;
     aid_input.gid = 1004;
     aid_inet.gid = 3003;
@@ -82,6 +100,7 @@ in
       "render"
       "audio"
       "input"
+      "droidspaces-gpu"
       "aid_inet"
       "aid_graphics"
       "aid_input"
@@ -117,7 +136,9 @@ in
   system.stateVersion = "25.05";
 
   environment.systemPackages = with pkgs; [
-    # Nested-Wayland, GPU diagnostics, audio & Android bridge tooling
+    # Pure-Wayland headless host + remote viewer server (`sway` + `wayvnc`), GPU & audio tooling
+    sway
+    wayvnc
     weston
     cage
     mesa
