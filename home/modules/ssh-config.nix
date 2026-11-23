@@ -18,6 +18,7 @@ let
         HostName ${h.hostName}
         User ${h.user}
     ''
+    + lib.optionalString ((h.port or null) != null) "  Port ${toString h.port}\n"
     + lib.optionalString ((h.proxyJump or null) != null) "  ProxyJump ${h.proxyJump}\n";
 
   renderControlMaster = h: ''

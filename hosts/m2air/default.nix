@@ -1,78 +1,23 @@
 # MacBook Air M2 — Thomas's personal NixOS host configuration.
+# Shared workstation apps, policies, keyring, IME, remote builder, and backups live in
+# `hosts/common/workstation.nix`; this file holds only Apple Silicon / laptop specifics.
 {
-  config,
   lib,
-  pkgs,
   inventory,
   ...
 }:
 let
   inherit (inventory) user;
-  rencal = pkgs.callPackage ../../pkgs/rencal.nix { };
-  secretPath = config.thomas.secrets.path;
-  # Cursor writes JSON with comments, including its per-install crash reporter ID.
-  jsoncParser = pkgs.fetchzip {
-    url = "https://registry.npmjs.org/jsonc-parser/-/jsonc-parser-3.3.1.tgz";
-    hash = "sha256-eZb4Epz0UsTTaSstqBl46Sy/KRyKaJ+vBUJ92/6wsZY=";
-  };
-  configureCursorKeyring = pkgs.writeText "cursor-keyring.cjs" ''
-    const fs = require("node:fs");
-    const path = require("node:path");
-    const { randomUUID } = require("node:crypto");
-    const jsonc = require("${jsoncParser}");
-    const dir = path.join(process.env.HOME, ".cursor");
-    const file = path.join(dir, "argv.json");
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const exists = fs.existsSync(file);
-    const source = exists ? fs.readFileSync(file, "utf8") : "{}\n";
-    const errors = [];
-    const current = jsonc.parse(source, errors, { allowTrailingComma: true });
-    if (errors.length || !current || typeof current !== "object" || Array.isArray(current)) {
-      console.error("Cursor keyring setting skipped: argv.json is not a valid JSONC object.");
-    } else if (current["password-store"] !== "gnome-libsecret") {
-      const edits = jsonc.modify(source, ["password-store"], "gnome-libsecret", {
-        formattingOptions: { insertSpaces: false, tabSize: 4, eol: source.includes("\r\n") ? "\r\n" : "\n" }
-      });
-      const tmp = file + "." + randomUUID();
-      try {
-        fs.writeFileSync(tmp, jsonc.applyEdits(source, edits), {
-          flag: "wx", mode: exists ? fs.statSync(file).mode & 0o777 : 0o600
-        });
-        fs.renameSync(tmp, file);
-      } finally {
-        fs.rmSync(tmp, { force: true });
-      }
-    }
-  '';
-  # The native Carbon and Neon selectors require a newer CLI than this nixpkgs pin.
-  antigravityCli =
-    if lib.versionAtLeast pkgs.antigravity-cli.version "1.5.13" then
-      pkgs.antigravity-cli
-    else
-      pkgs.antigravity-cli.overrideAttrs {
-        version = "1.5.13";
-        src = pkgs.fetchurl {
-          url = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.13-5999302598852608/linux-arm/cli_linux_arm64.tar.gz";
-          hash = "sha512-3M6i60VQmfUXXwyHzEezj87+TLDLRN6jknRpu0u/aKw8CzD8BK/7JMF+kJWThqk8N4Xo5LixozOMpOTVe4AFew==";
-        };
-      };
-  agentGit = import ../../lib/agent-git.nix {
-    inherit pkgs;
-    inherit (user) agent;
-  };
-
 in
 {
   imports = [
-    ../common/desktop.nix
+    ../common/workstation.nix
     ./hardware.nix
-    ./secrets.nix
     ./bench.nix
     ./gnosisvpn.nix
   ];
 
   networking.hostName = "m2air";
-  environment.sessionVariables.ORB_DEFAULT_UI = "hybrid";
 
   omarchnix = {
     # Live systemd job tree on the boot console (also answers the LUKS prompt).
@@ -85,26 +30,16 @@ in
       nearby.enable = true;
       kdeconnect.enable = true;
     };
-    inherit (inventory) mesh;
-    macTether = {
-      enable = true;
-    };
+    mesh = inventory.meshByHost.m2air or inventory.mesh;
+    macTether.enable = true;
     desktop = {
-      keyboard = {
-        layout = "us";
-        variant = "intl";
-      };
       touchpad = {
         naturalScroll = false;
         scrollFactor = 0.5;
         # macOS default: pressing clicks, a light touch never does.
         tapToClick = false;
       };
-      murmure.enable = true;
-      macos = {
-        enable = true;
-        gestures = true;
-      };
+      macos.gestures = true;
       autostartTty = {
         enable = true;
         unlockKeyringFromLuks = true;
@@ -126,202 +61,11 @@ in
     };
   };
 
-  # Preserve every local edit, including repeated Hyprland configuration trials.
-  home-manager.backupCommand = pkgs.writeShellScript "m2air-home-backup" ''
-    exec ${pkgs.coreutils}/bin/mv --backup=numbered --no-target-directory -- "$1" "$1.hm-bak"
-  '';
-
   home-manager.users.${user.username} = {
-    xdg.dataFile."applications/cursor.desktop".source =
-      let
-        cursorRoot = "${config.users.users.${user.username}.home}/work/nixos/cursor";
-        launchCursor = pkgs.writeShellScript "launch-cursor" ''
-          if [ -x "${cursorRoot}/bin/cursor" ]; then
-            exec "${cursorRoot}/bin/cursor" "$@"
-          fi
-          exec ${pkgs.code-cursor}/bin/cursor "$@"
-        '';
-        launcher = pkgs.makeDesktopItem {
-          name = "cursor";
-          desktopName = "Cursor";
-          genericName = "Code Editor";
-          exec = "${launchCursor} %F";
-          icon = "${pkgs.code-cursor}/share/pixmaps/cursor.png";
-          categories = [
-            "Development"
-            "IDE"
-          ];
-          startupWMClass = "cursor";
-        };
-      in
-      "${launcher}/share/applications/cursor.desktop";
-    home.activation.cursorKeyring =
-      config.home-manager.users.${user.username}.lib.dag.entryAfter [ "writeBoundary" ]
-        ''
-          run ${pkgs.nodejs}/bin/node ${configureCursorKeyring}
-        '';
     programs.omarchnix.sharing.kdeconnect.androidMirroring.enable = true;
-    # First-install release of this user's home state; never bump it to "upgrade".
-    home.stateVersion = "25.05";
   };
-
-  # First-install release of this host's state. Never bump it to "upgrade"; it only
-  # changes when the machine is reinstalled.
-  system.stateVersion = "25.05";
-
-  # Proprietary desktop binaries (Antigravity, Claude Desktop, ChatGPT/Codex, Widevine CDM);
-  # allow only those unfree packages rather than the whole unfree set.
-  nixpkgs.config.allowUnfreePackages = [
-    "antigravity-hub"
-    "antigravity-cli"
-    "chatgpt"
-    "claude-code"
-    "claude-desktop"
-    "cursor"
-    "widevine-cdm"
-  ];
-
-  programs.firefox.enable = true;
-
-  systemd.packages = [ rencal ];
-  systemd.user.services.rencal-notifierd.wantedBy = [ "graphical-session.target" ];
-
-  # Helium/Chromium managed policies: keep Omarchy's device color-scheme policy,
-  # replace KISS Translator with FluentRead (configured for Orb Router builtin/fast).
-  environment.etc."chromium/policies/managed".source =
-    pkgs.runCommand "m2air-chromium-managed-policies" { }
-      ''
-        mkdir -p "$out"
-        cat > "$out/10-omarchnix-color-scheme.json" <<'EOF'
-        {
-          "BrowserColorScheme": "device"
-        }
-        EOF
-        cat > "$out/20-fluentread.json" <<'EOF'
-        {
-          "ExtensionSettings": {
-            "bdiifdefkgmcblbcghdlonllpjhhjgof": {
-              "installation_mode": "blocked"
-            },
-            "djnlaiohfaaifbibleebjggkghlmcpcj": {
-              "installation_mode": "force_installed",
-              "update_url": "https://clients2.google.com/service/update2/crx"
-            }
-          }
-        }
-        EOF
-      '';
-
-  environment.systemPackages = with pkgs; [
-    android-tools
-    helium
-    bitwarden-desktop
-    (callPackage ../../pkgs/cursor-system.nix { })
-    telegram-desktop
-    signal-desktop-frameless
-    vesktop
-    age
-    bun
-    restic
-    rclone
-    gh
-    libsecret
-    turbo-lean
-    murmure
-    orb-desktop
-    folio-desktop
-    rencal
-    (agentGit.wrap antigravity-hub)
-    (agentGit.wrap antigravityCli)
-    (agentGit.wrap claude-code)
-    (agentGit.wrap claude-desktop)
-    # ChatGPT desktop (official Linux build), which includes the Codex app.
-    (agentGit.wrap chatgpt)
-    (agentGit.wrap codex)
-  ];
-
-  # Keep /nix/store, user profiles, and the 476 MiB /boot EFI partition lean automatically
-  # while always retaining at least 5 rollbacks.
-  # Build on the dgx-spark (20-core aarch64, 119 GB) instead of this 16 GB laptop.
-  # The Nix daemon offloads every derivation it cannot substitute, so `nh os switch`,
-  # `nixos-rebuild` and plain `nix build` all use it without extra flags; when spark is
-  # unreachable (off the mesh) the daemon falls back to building locally.
-  #
-  # Least privilege on spark: the key logs in as `nixbuild`, an account with no sudo and a
-  # locked password, and spark's authorized_keys pins it to
-  # `restrict,command="nix-daemon --stdio"`, so it can speak the Nix protocol and nothing
-  # else. `nixbuild` is NOT a trusted Nix user there: spark accepts build inputs from this
-  # laptop only because they are signed with /etc/nix/signing-key.sec, whose public half is
-  # in spark's trusted-public-keys (/etc/nix/nix.custom.conf).
-  # One-time setup, as root on this laptop:
-  #   sudo ssh-keygen -t ed25519 -N "" -C nix-builder@m2air -f /root/.ssh/nix-builder-spark
-  #   sudo nix-store --generate-binary-cache-key m2air-builder-1 /etc/nix/signing-key.sec /etc/nix/signing-key.pub
-  #   sudo nix store sign --all --key-file /etc/nix/signing-key.sec
-  nix.distributedBuilds = true;
-  nix.buildMachines = [
-    {
-      inherit (inventory.builder) hostName;
-      protocol = "ssh-ng";
-      sshUser = "nixbuild";
-      sshKey = secretPath "nix_builder_spark_key" "/root/.ssh/nix-builder-spark";
-      systems = [ "aarch64-linux" ];
-      maxJobs = 8;
-      speedFactor = 8;
-      supportedFeatures = [
-        "big-parallel"
-        "nixos-test"
-        "benchmark"
-      ];
-    }
-  ];
-  nix.settings = {
-    builders-use-substitutes = true;
-    connect-timeout = 5;
-    fallback = true;
-    # Sign everything built here so the untrusted builder account can receive it.
-    secret-key-files = [ (secretPath "nix_signing_key" "/etc/nix/signing-key.sec") ];
-  };
-  programs.ssh = {
-    knownHosts.${inventory.builder.hostName}.publicKey = inventory.builder.hostKey;
-    # Detect half-open `ssh-ng` builder sockets within ~45s if the laptop sleeps or roams
-    # instead of blocking `nix-daemon` indefinitely on `read()`.
-    extraConfig = ''
-      Host ${inventory.builder.hostName}
-        ConnectTimeout 5
-        ServerAliveInterval 15
-        ServerAliveCountMax 3
-        TCPKeepAlive yes
-    '';
-  };
-
-  programs.nh = {
-    enable = true;
-    flake = "/home/${user.username}/work/nixos/nixos-config";
-    clean = {
-      enable = true;
-      dates = "weekly";
-      extraArgs = "--keep 5 --keep-since 7d";
-    };
-  };
-
-  # Allow `sudo nixos-rebuild {boot,switch}` to evaluate the user-owned flake cleanly
-  # via `/etc/nixos -> /home/thomas/work/nixos/nixos-config` without git ownership errors.
-  programs.git = {
-    enable = true;
-    config.safe.directory = [
-      "/home/${user.username}/work/nixos/nixos-config"
-      "/home/${user.username}/work/nixos/omarchnix"
-    ];
-  };
-
-  # Secret Service (org.freedesktop.secrets) required by Bitwarden Desktop for
-  # biometric unlock alongside Polkit (`polkit-1` PAM -> `pam_fprintd.so`).
-  services.gnome.gnome-keyring.enable = true;
 
   # YubiKey PIV SSH agent for the Paloma fleet admin key (`thomas-yubikey-admin`).
-  # Runs as a user service at /run/user/<uid>/yubikey-agent/yubikey-agent.sock,
-  # which `home/modules/ssh-config.nix` selects so fleet SSH never falls back to
-  # the offline break-glass key. The module also enables pcscd.
   services.yubikey-agent.enable = true;
 
   # Keep Apple M2 ISO physical `~`/`` ` `` key next to Left Shift (<TLDE>) instead of
@@ -331,14 +75,6 @@ in
     "L /etc/nixos - - - - /home/${user.username}/work/nixos/nixos-config"
     "w /sys/module/hid_apple/parameters/iso_layout - - - - 0"
   ];
-
-  # Wayland IME (fcitx5) so dead keys (`~`, `` ` ``, `'`, `"`, `^`) display underlined
-  # preedit in foot and Wayland apps, matching macOS U.S. International - PC.
-  i18n.inputMethod = {
-    enable = true;
-    type = "fcitx5";
-    fcitx5.waylandFrontend = true;
-  };
 
   users.users.${user.username} = {
     extraGroups = [
@@ -351,4 +87,8 @@ in
     ];
     openssh.authorizedKeys.keys = user.sshKeys.m2airAuthorized;
   };
+
+  # First-install release of this host's state. Never bump it to "upgrade"; it only
+  # changes when the machine is reinstalled.
+  system.stateVersion = "25.05";
 }

@@ -1037,8 +1037,8 @@ apply_profile_live() {
             omarchy_name="balanced"
             cpus="0-7"; mask="ff"; nice_val="0"
             cpu0_gov="walt"; cpu6_gov="walt"
-            cpu0_max="3532800"; cpu6_max="4320000"
-            gpu_max_lvl="0"; gpu_min_lvl="13"; gpu_def_lvl="9"
+            cpu0_max="2784000"; cpu6_max="3532800"
+            gpu_max_lvl="2"; gpu_min_lvl="13"; gpu_def_lvl="10"
             blur_passes="3"
             ;;
         full|performance)

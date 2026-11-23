@@ -31,6 +31,16 @@
     enable = false;
     instances = { };
   };
+  meshByHost = {
+    m2air = {
+      enable = false;
+      instances = { };
+    };
+    razr = {
+      enable = false;
+      instances = { };
+    };
+  };
 
   builder = {
     hostName = "192.0.2.30";

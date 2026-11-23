@@ -1,12 +1,12 @@
-# sops-nix secrets for razr (`secrets/razr.yaml`).
+# Parameterized sops-nix secrets module (`secrets/<hostName>.yaml`).
 #
-# The file is encrypted to two recipients (see `.sops.yaml`):
-#   - this host's key at /var/lib/sops-nix/key.txt, used at activation;
-#   - Thomas's offline backup age key (private half in the Bitwarden personal vault),
-#     so every secret here can be recovered without this device.
+# Shared by every personal workstation host (`m2air`, `razr`). Each file is encrypted to:
+#   - the host's age key at /var/lib/sops-nix/key.txt, used at activation;
+#   - Thomas's offline backup age key (private half in Bitwarden), so every secret can
+#     be recovered independently of the device.
 #
-# Each secret is wired only once its key exists in the file, so the host builds and
-# evaluates cleanly until `secrets/razr.yaml` is provisioned.
+# Each secret is wired only once its key exists in `secrets/<hostName>.yaml`, so a fresh
+# host evaluates and builds cleanly before `sudo bootstrap-secrets` is run.
 {
   config,
   lib,
@@ -16,7 +16,8 @@
 }:
 let
   inherit (inventory) user;
-  file = ../../secrets/razr.yaml;
+  hostName = config.networking.hostName;
+  file = ../../secrets + "/${hostName}.yaml";
   present = builtins.pathExists file;
   content = if present then builtins.readFile file else "";
   has = key: lib.hasInfix "\n${key}:" "\n${content}";
@@ -27,14 +28,14 @@ in
     readOnly = true;
     description = ''
       `name -> fallback -> path`: the decrypted sops path of `name` when
-      `secrets/razr.yaml` defines it, otherwise `fallback` (the hand-provisioned file).
+      `secrets/<hostName>.yaml` defines it, otherwise `fallback`.
     '';
     default = name: fallback: if has name then config.sops.secrets.${name}.path else fallback;
   };
 
   config = lib.mkMerge [
     {
-      # `sudo bootstrap-secrets` creates or extends secrets/razr.yaml.
+      # `sudo bootstrap-secrets` creates or extends secrets/<hostName>.yaml.
       environment.systemPackages = [
         (pkgs.writeShellApplication {
           name = "bootstrap-secrets";

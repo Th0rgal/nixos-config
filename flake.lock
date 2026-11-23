@@ -138,11 +138,11 @@
     "inventory": {
       "flake": false,
       "locked": {
-        "lastModified": 1794666854,
-        "narHash": "sha256-BQGUPPbvt0+njsdPs5V5AwaYWUNnrL9gl6pZ1MjOvzU=",
+        "lastModified": 1795473998,
+        "narHash": "sha256-YOQPErk5vFMsHGb/ZY++1fxFWHjVB8137vP1YtdQD4Q=",
         "ref": "refs/heads/main",
-        "rev": "cba2b94d88a46e221b52e005aea4543180d97160",
-        "revCount": 1,
+        "rev": "dacb2dd6d73772e92fc62658f6f03731dec47dfb",
+        "revCount": 2,
         "type": "git",
         "url": "ssh://git@github.com/Th0rgal/nixos-inventory.git"
       },
