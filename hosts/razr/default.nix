@@ -202,8 +202,21 @@ in
     bun
     restic
     rclone
-    folio-desktop
   ];
+
+  # Hardware-backed Razr side-button Touch ID via SideSystem BiometricPrompt (ECDSA P-256 StrongBox)
+  security.pam.services.sudo.rules.auth.sidesystem-touchid = {
+    order = 11400;
+    control = "sufficient";
+    modulePath = "${pkgs.pam}/lib/security/pam_exec.so";
+    args = [ "quiet" "/var/lib/sidesystem/sidesystem-touchid-auth" ];
+  };
+  security.pam.services.polkit-1.rules.auth.sidesystem-touchid = {
+    order = 11400;
+    control = "sufficient";
+    modulePath = "${pkgs.pam}/lib/security/pam_exec.so";
+    args = [ "quiet" "/var/lib/sidesystem/sidesystem-touchid-auth" ];
+  };
 
   # Keep full 1:1 desktop parity (Ghostty, frosted glass, animations) with m2air;
   # only disable hypridle auto-lock inside the container since Android's lockscreen

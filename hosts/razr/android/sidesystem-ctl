@@ -863,6 +863,12 @@ EOF
         || die "Failed to start desktop session inside container"
 
     ensure_container_hw_bridge
+    # Ensure Sunshine uinput -> Wayland input bridge is running (works completely cable-free!)
+    if [ -x "${BASE_DIR}/bin/bt-hid-bridge" ]; then
+        killall bt-hid-bridge 2>/dev/null || true
+        sleep 0.2
+        setsid "${BASE_DIR}/bin/bt-hid-bridge" --sunshine "$VNC_PORT" >"${BASE_DIR}/sunshine-input.log" 2>&1 </dev/null &
+    fi
     apply_profile_live "$PROFILE" || true
     log "Desktop started (${DISPLAY_MODE}, scale=${DISPLAY_SCALE}, gpu=${GPU_MODE}, profile=${PROFILE}, VNC 127.0.0.1:${VNC_PORT})."
 }
@@ -889,9 +895,55 @@ ensure_container_hw_bridge() {
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
         mkdir -p /var/lib/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
         chmod 755 /var/lib/sidesystem
-        touch /var/lib/sidesystem/power-profile /var/lib/sidesystem/power-profile-req
+        touch /var/lib/sidesystem/power-profile /var/lib/sidesystem/power-profile-req /var/lib/sidesystem/bio-req /var/lib/sidesystem/bio-resp
         chmod 644 /var/lib/sidesystem/power-profile
-        chmod 666 /var/lib/sidesystem/power-profile-req
+        chmod 666 /var/lib/sidesystem/power-profile-req /var/lib/sidesystem/bio-req /var/lib/sidesystem/bio-resp
+        cat > /var/lib/sidesystem/sidesystem-touchid-auth <<'\''TIDEOF'\''
+#!/bin/sh
+# PAM pam_exec helper: requests hardware-backed Touch ID signature from SideSystem on Android.
+set -eu
+export PATH="/run/current-system/sw/bin:/usr/bin:/bin"
+REQ="/var/lib/sidesystem/bio-req"
+RESP="/var/lib/sidesystem/bio-resp"
+PUB="/var/lib/sidesystem/touchid.pub"
+[ -w "$REQ" ] || exit 1
+nonce="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d '\'' \n'\'')"
+reason="NixOS ${PAM_SERVICE:-sudo} (${PAM_USER:-thomas})"
+: > "$RESP" 2>/dev/null || true
+printf "%s|%s\n" "$nonce" "$reason" > "$REQ"
+i=0
+line=""
+while [ "$i" -lt 120 ]; do
+    if [ -s "$RESP" ]; then
+        line="$(head -n 1 "$RESP" 2>/dev/null | tr -d '\''\r'\'')"
+        : > "$RESP" 2>/dev/null || true
+        break
+    fi
+    sleep 0.25
+    i=$((i + 1))
+done
+case "$line" in
+    "OK ${nonce} "*)
+        sig_b64="${line#OK ${nonce} }"
+        if [ -r "$PUB" ] && command -v openssl >/dev/null 2>&1; then
+            tmpd="$(mktemp -d)"
+            trap '\''rm -rf "$tmpd"'\'' EXIT
+            {
+                echo "-----BEGIN PUBLIC KEY-----"
+                cat "$PUB"
+                echo "-----END PUBLIC KEY-----"
+            } > "$tmpd/pub.pem"
+            printf "%s" "$sig_b64" | openssl base64 -d -A > "$tmpd/sig.der" 2>/dev/null || exit 1
+            printf "%s" "$nonce" | openssl dgst -sha256 -verify "$tmpd/pub.pem" -signature "$tmpd/sig.der" >/dev/null 2>&1 || exit 1
+        fi
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+TIDEOF
+        chmod 755 /var/lib/sidesystem/sidesystem-touchid-auth
         [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
         [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
         [ -c /dev/uinput ] || mknod -m 666 /dev/uinput c 10 223 2>/dev/null || true
@@ -915,10 +967,19 @@ ensure_container_hw_bridge() {
 #!/system/bin/sh
 echo "$$" > /data/local/nixos/powerd.pid
 REQ="/data/local/nixos/mnt/var/lib/sidesystem/power-profile-req"
+BIO_REQ="/data/local/nixos/mnt/var/lib/sidesystem/bio-req"
 PROF_FILE="/data/local/nixos/mnt/var/lib/sidesystem/power-profile"
 tick=0
 thermal_stepped=0
 while true; do
+    if [ -s "$BIO_REQ" ]; then
+        bline="$(head -n 1 "$BIO_REQ" 2>/dev/null | tr -d '\r\n')"
+        : > "$BIO_REQ" 2>/dev/null || true
+        bnonce="${bline%%|*}"
+        breason="${bline#*|}"
+        [ -n "$bnonce" ] && am start -n com.th0rgal.sidesystem/.BiometricAuthActivity \
+            --es nonce "$bnonce" --es reason "${breason:-NixOS authentication}" >/dev/null 2>&1 || true
+    fi
     if [ -s "$REQ" ]; then
         val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
         : > "$REQ" 2>/dev/null || true
