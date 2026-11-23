@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
                         status = next
                         if (!telemetryPaused) {
                             telemetryHistory = if (next.containerRunning) {
-                                (telemetryHistory + TelemetrySample(next.cpuPct, next.memPct)).takeLast(60)
+                                (telemetryHistory + TelemetrySample(next.cpuPct, next.gpuPct, next.memPct)).takeLast(60)
                             } else {
                                 emptyList()
                             }

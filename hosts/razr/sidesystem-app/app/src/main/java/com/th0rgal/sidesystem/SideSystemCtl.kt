@@ -97,6 +97,7 @@ enum class GpuMode(val cliValue: String, val label: String, val subtitle: String
 
 data class TelemetrySample(
     val cpuPct: Int,
+    val gpuPct: Int,
     val memPct: Int
 )
 
@@ -113,6 +114,7 @@ data class SideSystemStatus(
     val memUsedMb: Int = 0,
     val memTotalMb: Int = 0,
     val cpuPct: Int = 0,
+    val gpuPct: Int = 0,
     val powerProfile: PowerProfile = PowerProfile.BALANCED,
     val gpuMode: GpuMode = GpuMode.LLVMPIPE,
     val networkType: String = "Offline",
@@ -330,6 +332,7 @@ object SideSystemCtl {
             val memUsed = obj.optInt("mem_used_mb", 0)
             val memTotal = obj.optInt("mem_total_mb", 0)
             val cpuPct = obj.optInt("cpu_pct", 0).coerceIn(0, 100)
+            val gpuPct = obj.optInt("gpu_pct", 0).coerceIn(0, 100)
 
             val profile = PowerProfile.fromString(
                 obj.optString("profile", obj.optString("power_profile", "balanced"))
@@ -375,6 +378,7 @@ object SideSystemCtl {
                 memUsedMb = memUsed,
                 memTotalMb = memTotal,
                 cpuPct = cpuPct,
+                gpuPct = gpuPct,
                 powerProfile = profile,
                 gpuMode = gpuMode,
                 networkType = netType,

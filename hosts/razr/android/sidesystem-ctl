@@ -535,7 +535,7 @@ SCALE="$2"
 GPU_MODE="$3"
 VNC_PORT="$4"
 
-export PATH="/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
+export PATH="${HOME}/.local/bin:/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/bin:${HOME}/.nix-profile/bin:/usr/bin:/bin"
 export XDG_RUNTIME_DIR="/tmp/xdg-razr"
 
 # Clean up any previous desktop stack (match wrapped binaries like .Hyprland-wrapped too).
@@ -575,9 +575,35 @@ for_window [app_id=".*"] fullscreen enable
 for_window [class=".*"] fullscreen enable
 SWAYEOF
 
-# Launch headless sway (must use GLES2/llvmpipe, NOT pixman, so zwp_linux_dmabuf_v1 is advertised for Aquamarine/Hyprland).
-LIBGL_ALWAYS_SOFTWARE=1 \
-GALLIUM_DRIVER=llvmpipe \
+# Configure GPU environment for BOTH outer headless sway and nested Hyprland & Wayland apps.
+# Uses patched mesa-razr-kgsl (ZINK_KGSL_FALLBACK=1 + Turnip KGSL without KHR_display abort)
+# with 12 MiB on-die GMEM enabled (TU_DEBUG=noconform) for full Adreno 830 v2 acceleration.
+if [ "$GPU_MODE" = "hw" ]; then
+    MESA_KGSL_DIR="$(ls -1d /nix/store/*-mesa-razr-kgsl-* 2>/dev/null | grep -vE -- '-(debug|opencl|cross_tools|spirv2dxil)$' | head -n 1)"
+    if [ -n "$MESA_KGSL_DIR" ] && [ -d "$MESA_KGSL_DIR/lib" ]; then
+        export LIBGL_DRIVERS_PATH="${MESA_KGSL_DIR}/lib/dri"
+        export GBM_BACKENDS_PATH="${MESA_KGSL_DIR}/lib/gbm"
+        export __EGL_VENDOR_LIBRARY_FILENAMES="${MESA_KGSL_DIR}/share/glvnd/egl_vendor.d/50_mesa.json"
+        export VK_ICD_FILENAMES="${MESA_KGSL_DIR}/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    else
+        export VK_ICD_FILENAMES="/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+    fi
+    export MESA_LOADER_DRIVER_OVERRIDE=zink
+    export GALLIUM_DRIVER=zink
+    export ZINK_KGSL_FALLBACK=1
+    export TU_DEBUG=noconform
+    export AQ_NO_MODIFIERS=1
+    export WLR_RENDERER_ALLOW_SOFTWARE=1
+    unset LIBGL_ALWAYS_SOFTWARE
+else
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export GALLIUM_DRIVER=llvmpipe
+    export AQ_NO_MODIFIERS=1
+    export WLR_RENDERER_ALLOW_SOFTWARE=1
+    unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
+fi
+
+# Launch headless sway (uses Adreno 830 Zink+Turnip when gpu=hw, or llvmpipe when gpu=sw).
 WLR_BACKENDS=headless \
 WLR_LIBINPUT_NO_DEVICES=1 \
 WLR_RENDERER_ALLOW_SOFTWARE=1 \
@@ -603,34 +629,6 @@ done
 if [ -z "$SWAY_SOCK" ]; then
     echo "ERROR: headless sway Wayland socket did not appear" >&2
     exit 1
-fi
-
-# Configure GPU environment for nested Hyprland & Wayland apps.
-# Uses patched mesa-razr-kgsl (ZINK_KGSL_FALLBACK=1 + Turnip KGSL without KHR_display abort)
-# for full hardware Adreno 830 v2 Vulkan 1.4 + OpenGL 4.6 acceleration.
-if [ "$GPU_MODE" = "hw" ]; then
-    MESA_KGSL_DIR="$(ls -1d /nix/store/*-mesa-razr-kgsl-* 2>/dev/null | grep -vE -- '-(debug|opencl|cross_tools|spirv2dxil)$' | head -n 1)"
-    if [ -n "$MESA_KGSL_DIR" ] && [ -d "$MESA_KGSL_DIR/lib" ]; then
-        export LIBGL_DRIVERS_PATH="${MESA_KGSL_DIR}/lib/dri"
-        export GBM_BACKENDS_PATH="${MESA_KGSL_DIR}/lib/gbm"
-        export __EGL_VENDOR_LIBRARY_FILENAMES="${MESA_KGSL_DIR}/share/glvnd/egl_vendor.d/50_mesa.json"
-        export VK_ICD_FILENAMES="${MESA_KGSL_DIR}/share/vulkan/icd.d/freedreno_icd.aarch64.json"
-    else
-        export VK_ICD_FILENAMES="/run/opengl-driver/share/vulkan/icd.d/freedreno_icd.aarch64.json"
-    fi
-    export MESA_LOADER_DRIVER_OVERRIDE=zink
-    export GALLIUM_DRIVER=zink
-    export ZINK_KGSL_FALLBACK=1
-    export TU_DEBUG=noconform,sysmem
-    export AQ_NO_MODIFIERS=1
-    export WLR_RENDERER_ALLOW_SOFTWARE=1
-    unset LIBGL_ALWAYS_SOFTWARE
-else
-    export LIBGL_ALWAYS_SOFTWARE=1
-    export GALLIUM_DRIVER=llvmpipe
-    export AQ_NO_MODIFIERS=1
-    export WLR_RENDERER_ALLOW_SOFTWARE=1
-    unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
 # Launch Hyprland nested on sway's Wayland socket via start-hyprland (avoids startup warning banner).
@@ -736,7 +734,9 @@ EOF
         "/bin/sh /tmp/sidesystem-desktop-start.sh '${SWAY_RES}' '${DISPLAY_SCALE}' '${GPU_MODE}' '${VNC_PORT}'" \
         || die "Failed to start desktop session inside container"
 
-    log "Desktop started (${DISPLAY_MODE}, scale=${DISPLAY_SCALE}, VNC 127.0.0.1:${VNC_PORT})."
+    ensure_container_hw_bridge
+    apply_profile_live "$PROFILE" || true
+    log "Desktop started (${DISPLAY_MODE}, scale=${DISPLAY_SCALE}, gpu=${GPU_MODE}, profile=${PROFILE}, VNC 127.0.0.1:${VNC_PORT})."
 }
 
 cmd_desktop() {
@@ -751,21 +751,109 @@ cmd_desktop() {
 }
 
 # ---------------------------------------------------------------------------
-# profile eco | balanced | full
+# profile eco (power-saver) | balanced | full (performance)
 # ---------------------------------------------------------------------------
+ensure_container_hw_bridge() {
+    # Expose Hexagon V79 NPU FastRPC devices + /run/sidesystem power-profile bridge inside container
+    if ! container_pid >/dev/null 2>&1; then
+        return 0
+    fi
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
+        mkdir -p /run/sidesystem /run/host-vendor-dsp/cdsp /run/host-vendor-dsp/adsp
+        chmod 755 /run/sidesystem
+        touch /run/sidesystem/power-profile /run/sidesystem/power-profile-req
+        chmod 644 /run/sidesystem/power-profile
+        chmod 666 /run/sidesystem/power-profile-req
+        [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
+        [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
+        chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure 2>/dev/null || true
+    ' >/dev/null 2>&1 || true
+
+    # Start lightweight host-side power-profile request watcher so Omarchy Shell top bar
+    # can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
+    if ! pgrep -f "sidesystem-powerd" >/dev/null 2>&1; then
+        cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
+#!/system/bin/sh
+REQ="/data/local/nixos/mnt/run/sidesystem/power-profile-req"
+while true; do
+    if [ -s "$REQ" ]; then
+        val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
+        : > "$REQ" 2>/dev/null || true
+        case "$val" in
+            power-saver|eco)         /data/local/nixos/bin/sidesystem-ctl profile eco >/dev/null 2>&1 || true ;;
+            balanced)                /data/local/nixos/bin/sidesystem-ctl profile balanced >/dev/null 2>&1 || true ;;
+            performance|full)        /data/local/nixos/bin/sidesystem-ctl profile full >/dev/null 2>&1 || true ;;
+        esac
+    fi
+    sleep 1
+done
+PWRD
+        chmod 755 "${BASE_DIR}/bin/sidesystem-powerd"
+        nohup "${BASE_DIR}/bin/sidesystem-powerd" >/dev/null 2>&1 </dev/null &
+    fi
+}
+
 apply_profile_live() {
     prof="$1"
     case "$prof" in
-        eco)      cpus="0-5"; mask="3f"; nice_val="5" ;;
-        balanced) cpus="0-7"; mask="ff"; nice_val="0" ;;
-        full)     cpus="0-7"; mask="ff"; nice_val="-2" ;;
-        *)        return 1 ;;
+        eco|power-saver)
+            prof="eco"
+            omarchy_name="power-saver"
+            cpus="0-5"; mask="3f"; nice_val="5"
+            cpu0_gov="walt"; cpu6_gov="walt"
+            cpu0_max="1958400"; cpu6_max="1267200"
+            gpu_max_lvl="9"; gpu_min_lvl="13"; gpu_def_lvl="12"
+            blur_passes="1"
+            ;;
+        balanced)
+            omarchy_name="balanced"
+            cpus="0-7"; mask="ff"; nice_val="0"
+            cpu0_gov="walt"; cpu6_gov="walt"
+            cpu0_max="3532800"; cpu6_max="4320000"
+            gpu_max_lvl="0"; gpu_min_lvl="13"; gpu_def_lvl="9"
+            blur_passes="3"
+            ;;
+        full|performance)
+            prof="full"
+            omarchy_name="performance"
+            cpus="0-7"; mask="ff"; nice_val="-2"
+            cpu0_gov="performance"; cpu6_gov="performance"
+            cpu0_max="3532800"; cpu6_max="4320000"
+            gpu_max_lvl="0"; gpu_min_lvl="4"; gpu_def_lvl="0"
+            blur_passes="3"
+            ;;
+        *)
+            return 1
+            ;;
     esac
+
+    # 1. Tune Oryon CPU clusters (policy0: 6x Phoenix-M @ 3.53GHz, policy6: 2x Phoenix-L @ 4.32GHz)
+    printf '%s\n' "$cpu0_gov" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null || true
+    printf '%s\n' "$cpu6_gov" > /sys/devices/system/cpu/cpufreq/policy6/scaling_governor 2>/dev/null || true
+    printf '%s\n' "$cpu0_max" > /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 2>/dev/null || true
+    printf '%s\n' "$cpu6_max" > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+
+    # 2. Tune Adreno 830 v2 KGSL DVFS power levels (0 = 1.10 GHz, 4 = 832 MHz, 9 = 443 MHz, 13 = 160 MHz)
+    printf '%s\n' "$gpu_max_lvl" > /sys/class/kgsl/kgsl-3d0/max_pwrlevel 2>/dev/null || true
+    printf '%s\n' "$gpu_min_lvl" > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+    printf '%s\n' "$gpu_def_lvl" > /sys/class/kgsl/kgsl-3d0/default_pwrlevel 2>/dev/null || true
 
     cpid="$(container_pid || true)"
     if [ -z "$cpid" ]; then
         return 0
     fi
+
+    # 3. Publish active Omarchy profile state & adjust Hyprland Kawase blur passes live
+    ensure_container_hw_bridge
+    "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c "
+        printf '%s\n' '${omarchy_name}' > /run/sidesystem/power-profile 2>/dev/null || true
+        if [ -r /tmp/xdg-razr/session.env ]; then
+            /run/current-system/sw/bin/su -s /bin/sh - ${CONTAINER_USER} -c '
+                set -a; . /tmp/xdg-razr/session.env; set +a
+                /run/current-system/sw/bin/hyprctl --quiet eval \"hl.config({ decoration = { blur = { passes = ${blur_passes} } } })\" >/dev/null 2>&1 || true
+            '
+        fi
+    " >/dev/null 2>&1 || true
 
     # If the container lives in a dedicated cgroup v2 cpuset, apply cpuset.cpus there too.
     cg_rel="$(sed -n 's/^0:://p' "/proc/${cpid}/cgroup" 2>/dev/null | head -n 1)"

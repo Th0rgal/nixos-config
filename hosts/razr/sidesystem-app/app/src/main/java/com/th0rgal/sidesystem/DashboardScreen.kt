@@ -1707,9 +1707,9 @@ private fun TelemetryGraphCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val samples = remember(history, status.cpuPct, status.memPct) {
+    val samples = remember(history, status.cpuPct, status.gpuPct, status.memPct) {
         if (history.isNotEmpty()) history.takeLast(36)
-        else listOf(TelemetrySample(status.cpuPct, status.memPct))
+        else listOf(TelemetrySample(status.cpuPct, status.gpuPct, status.memPct))
     }
     val ramReadout = if (compact || status.memTotalMb <= 0) {
         "${status.memPct}%"
@@ -1762,6 +1762,30 @@ private fun TelemetryGraphCard(
                     )
                     Text(
                         text = "${status.cpuPct}%",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = if (compact) 11.sp else 12.sp
+                        ),
+                        color = OrbFgStrong
+                    )
+                    Spacer(modifier = Modifier.width(if (compact) 4.dp else 8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(OrbAmber)
+                    )
+                    Text(
+                        text = "GPU",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = if (compact) 10.sp else 11.sp,
+                            letterSpacing = 0.6.sp
+                        ),
+                        color = OrbFgMuted
+                    )
+                    Text(
+                        text = "${status.gpuPct}%",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Medium,
@@ -1829,13 +1853,21 @@ private fun TelemetryGraphCard(
                 }
 
                 val ramPoints = samples.map { it.memPct.coerceIn(0, 100) / 100f }
+                val gpuPoints = samples.map { it.gpuPct.coerceIn(0, 100) / 100f }
                 val cpuPoints = samples.map { it.cpuPct.coerceIn(0, 100) / 100f }
 
                 drawSmoothAreaSeries(
                     values = ramPoints,
                     maxSlots = 36,
                     color = OrbGreen,
-                    fillAlpha = 0.16f,
+                    fillAlpha = 0.14f,
+                    strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
+                )
+                drawSmoothAreaSeries(
+                    values = gpuPoints,
+                    maxSlots = 36,
+                    color = OrbAmber,
+                    fillAlpha = 0.18f,
                     strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
                 )
                 drawSmoothAreaSeries(
@@ -1927,6 +1959,7 @@ private fun DrawScope.drawSmoothAreaSeries(
 private enum class TelemetrySeriesFilter(val label: String) {
     ALL("All"),
     CPU("CPU"),
+    GPU("GPU"),
     RAM("RAM")
 }
 
@@ -1945,9 +1978,9 @@ private fun TelemetryExpandedOverlay(
     var seriesFilter by remember { mutableStateOf(TelemetrySeriesFilter.ALL) }
     var showControlsOverlay by remember { mutableStateOf(true) }
 
-    val samples = remember(history, status.cpuPct, status.memPct) {
+    val samples = remember(history, status.cpuPct, status.gpuPct, status.memPct) {
         if (history.isNotEmpty()) history.takeLast(60)
-        else listOf(TelemetrySample(status.cpuPct, status.memPct))
+        else listOf(TelemetrySample(status.cpuPct, status.gpuPct, status.memPct))
     }
 
     val cpuAvg = remember(samples) {
@@ -1955,6 +1988,12 @@ private fun TelemetryExpandedOverlay(
     }
     val cpuPeak = remember(samples) {
         samples.maxOfOrNull { it.cpuPct } ?: 0
+    }
+    val gpuAvg = remember(samples) {
+        if (samples.isEmpty()) 0 else samples.map { it.gpuPct }.average().toInt()
+    }
+    val gpuPeak = remember(samples) {
+        samples.maxOfOrNull { it.gpuPct } ?: 0
     }
     val ramFreeGb = remember(status.memUsedMb, status.memTotalMb) {
         if (status.memTotalMb > 0) {
@@ -2113,6 +2152,59 @@ private fun TelemetryExpandedOverlay(
                     }
                 }
 
+                if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.GPU) {
+                    Surface(
+                        color = OrbSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, OrbBorder),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(
+                                horizontal = if (isCoverScreen) 10.dp else 14.dp,
+                                vertical = if (isCoverScreen) 8.dp else 10.dp
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(OrbAmber)
+                                )
+                                Text(
+                                    text = "GPU",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OrbFgMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "${status.gpuPct}%",
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = if (isCoverScreen) 20.sp else 26.sp
+                                ),
+                                color = OrbFgStrong
+                            )
+                            Text(
+                                text = "avg $gpuAvg% · peak $gpuPeak%",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = OrbFgSubtle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
                 if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.RAM) {
                     Surface(
                         color = OrbSurface,
@@ -2232,7 +2324,16 @@ private fun TelemetryExpandedOverlay(
                                     values = samples.map { it.memPct.coerceIn(0, 100) / 100f },
                                     maxSlots = 60,
                                     color = OrbGreen,
-                                    fillAlpha = 0.20f,
+                                    fillAlpha = 0.16f,
+                                    strokeWidthPx = 2.dp.toPx()
+                                )
+                            }
+                            if (seriesFilter == TelemetrySeriesFilter.ALL || seriesFilter == TelemetrySeriesFilter.GPU) {
+                                drawSmoothAreaSeries(
+                                    values = samples.map { it.gpuPct.coerceIn(0, 100) / 100f },
+                                    maxSlots = 60,
+                                    color = OrbAmber,
+                                    fillAlpha = 0.22f,
                                     strokeWidthPx = 2.dp.toPx()
                                 )
                             }
