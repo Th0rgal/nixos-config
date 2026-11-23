@@ -221,6 +221,50 @@ read_gpu_pct() {
     fi
 }
 
+read_thermals_and_power() {
+    SOC_TEMP_C=0
+    BATT_TEMP_C=0
+    POWER_MW=0
+    NPU_READY="false"
+
+    # Peak across Oryon CPU, Adreno 830 GPU, and Hexagon V79 HVX/HMX sensors (millidegrees C)
+    peak_mc=0
+    for tz in /sys/class/thermal/thermal_zone22/temp /sys/class/thermal/thermal_zone32/temp /sys/class/thermal/thermal_zone48/temp /sys/class/thermal/thermal_zone51/temp; do
+        if [ -r "$tz" ]; then
+            t="$(tr -dc '0-9' < "$tz" 2>/dev/null || true)"
+            if is_uint "$t" && [ "$t" -gt "$peak_mc" ]; then
+                peak_mc="$t"
+            fi
+        fi
+    done
+    [ "$peak_mc" -gt 0 ] && SOC_TEMP_C=$((peak_mc / 1000))
+
+    # Battery / flip_battery temp (millidegrees C)
+    batt_mc=0
+    for tz in /sys/class/thermal/thermal_zone66/temp /sys/class/thermal/thermal_zone67/temp; do
+        if [ -r "$tz" ]; then
+            t="$(tr -dc '0-9' < "$tz" 2>/dev/null || true)"
+            if is_uint "$t" && [ "$t" -gt "$batt_mc" ]; then
+                batt_mc="$t"
+            fi
+        fi
+    done
+    [ "$batt_mc" -gt 0 ] && BATT_TEMP_C=$((batt_mc / 1000))
+
+    # Instantaneous battery power in milliwatts (|uV * uA| / 1e9)
+    if [ -r /sys/class/power_supply/battery/voltage_now ] && [ -r /sys/class/power_supply/battery/current_now ]; then
+        uv="$(tr -dc '0-9' < /sys/class/power_supply/battery/voltage_now 2>/dev/null || true)"
+        ua="$(tr -dc '0-9' < /sys/class/power_supply/battery/current_now 2>/dev/null || true)"
+        if is_uint "$uv" && is_uint "$ua"; then
+            POWER_MW=$(( (uv / 1000) * (ua / 1000) / 1000 ))
+        fi
+    fi
+
+    if [ -c /dev/fastrpc-cdsp ] && [ -r /vendor/dsp/cdsp/fastrpc_shell_unsigned_3 ]; then
+        NPU_READY="true"
+    fi
+}
+
 detect_network() {
     NET_TYPE="offline"
     NET_IP=""
@@ -277,6 +321,7 @@ cmd_status() {
     read_memory_mb
     read_cpu_pct
     read_gpu_pct
+    read_thermals_and_power
     detect_network
 
     c_running="false"
@@ -334,7 +379,7 @@ EOF
         bt_hid_val="true"
     fi
 
-    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"soc_temp_c":%s,"batt_temp_c":%s,"power_mw":%s,"npu_ready":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
         "$c_running" \
         "$c_pid" \
         "$(json_escape "$c_uptime")" \
@@ -351,6 +396,10 @@ EOF
         "$MEM_TOTAL_MB" \
         "$CPU_PCT" \
         "$GPU_PCT" \
+        "$SOC_TEMP_C" \
+        "$BATT_TEMP_C" \
+        "$POWER_MW" \
+        "$NPU_READY" \
         "$(json_escape "$PROFILE")" \
         "$autostart_val" \
         "$(json_escape "$GPU_MODE")" \
@@ -603,81 +652,132 @@ else
     unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
-# Launch headless sway with llvmpipe (wlroots headless needs GLES2 for nested Wayland clients
-# like Hyprland/Aquamarine, and KGSL does not expose a DRM render node for wlroots dmabuf).
-# Nested Hyprland and all Wayland apps below run full hardware Adreno 830 v2 Zink+Turnip (12 MiB GMEM).
-env -u MESA_LOADER_DRIVER_OVERRIDE -u ZINK_KGSL_FALLBACK -u TU_DEBUG \
-    -u VK_ICD_FILENAMES -u LIBGL_DRIVERS_PATH -u GBM_BACKENDS_PATH -u __EGL_VENDOR_LIBRARY_FILENAMES \
-    LIBGL_ALWAYS_SOFTWARE=1 \
-    GALLIUM_DRIVER=llvmpipe \
-    WLR_BACKENDS=headless \
-    WLR_LIBINPUT_NO_DEVICES=1 \
-    WLR_RENDERER_ALLOW_SOFTWARE=1 \
-    nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
-
-SWAY_SOCK=""
-i=0
-while [ "$i" -lt 50 ]; do
-    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
-        case "$s" in
-            *.lock) continue ;;
-        esac
-        if [ -S "$s" ]; then
-            SWAY_SOCK="$(basename "$s")"
-            break
-        fi
-    done
-    [ -n "$SWAY_SOCK" ] && break
-    sleep 0.2
-    i=$((i + 1))
-done
-
-if [ -z "$SWAY_SOCK" ]; then
-    echo "ERROR: headless sway Wayland socket did not appear" >&2
-    exit 1
-fi
-
-# Launch Hyprland nested on sway's Wayland socket via start-hyprland (avoids startup warning banner).
+# Launch Hyprland directly in native Aquamarine headless mode (ZERO outer sway, ZERO llvmpipe!)
+# when gpu=hw and patched aquamarine-razr (AQ_HEADLESS_DRM_NODE) is available; otherwise fall
+# back cleanly to headless sway + nested Hyprland.
+AQ_RAZR_LIB="$(ls -1 /nix/store/*-aquamarine-razr-*/lib/libaquamarine.so.* 2>/dev/null | head -n 1)"
 HYPR_LAUNCHER="Hyprland"
 if command -v start-hyprland >/dev/null 2>&1; then
     HYPR_LAUNCHER="start-hyprland"
 fi
-WAYLAND_DISPLAY="$SWAY_SOCK" \
-XDG_SESSION_TYPE=wayland \
-XDG_CURRENT_DESKTOP=Hyprland \
-    nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
 
+SWAY_SOCK=""
 HYPR_SIG=""
 HYPR_SOCK=""
-i=0
-while [ "$i" -lt 60 ]; do
-    for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
-        if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
-            HYPR_SIG="$(basename "$d")"
-            break
-        fi
-    done
-    for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
-        case "$s" in
-            *.lock) continue ;;
-        esac
-        bn="$(basename "$s")"
-        if [ -S "$s" ] && [ "$bn" != "$SWAY_SOCK" ]; then
-            HYPR_SOCK="$bn"
-            break
-        fi
-    done
-    [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
-    sleep 0.25
-    i=$((i + 1))
-done
+DIRECT_HEADLESS=0
 
-if [ -z "$HYPR_SIG" ]; then
-    echo "ERROR: Hyprland IPC did not appear" >&2
-    exit 1
-fi
-if [ -z "$HYPR_SOCK" ]; then
-    HYPR_SOCK="$SWAY_SOCK"
+if [ "$GPU_MODE" = "hw" ] && [ -n "$AQ_RAZR_LIB" ] && [ -r "$AQ_RAZR_LIB" ]; then
+    DIRECT_HEADLESS=1
+    unset WAYLAND_DISPLAY DISPLAY
+    AQ_HEADLESS_DRM_NODE=/dev/dri/renderD128 \
+    LD_PRELOAD="$AQ_RAZR_LIB" \
+    XDG_SESSION_TYPE=wayland \
+    XDG_CURRENT_DESKTOP=Hyprland \
+        nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 60 ]; do
+        for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
+            if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
+                HYPR_SIG="$(basename "$d")"
+                break
+            fi
+        done
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            if [ -S "$s" ]; then
+                HYPR_SOCK="$(basename "$s")"
+                break
+            fi
+        done
+        [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
+        sleep 0.25
+        i=$((i + 1))
+    done
+
+    if [ -z "$HYPR_SIG" ] || [ -z "$HYPR_SOCK" ]; then
+        echo "ERROR: Standalone headless Hyprland IPC did not appear" >&2
+        exit 1
+    fi
+
+    export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
+    export WAYLAND_DISPLAY="$HYPR_SOCK"
+    hyprctl output create headless HEADLESS-1 >/dev/null 2>&1 || true
+    hyprctl eval "hl.config({ monitor = { \"HEADLESS-1, ${SWAY_RES}, 0x0, ${SCALE}\" } })" >/dev/null 2>&1 || true
+    SWAY_SOCK="$HYPR_SOCK"
+else
+    # Fallback: headless sway with llvmpipe + nested Hyprland.
+    env -u MESA_LOADER_DRIVER_OVERRIDE -u ZINK_KGSL_FALLBACK -u TU_DEBUG \
+        -u VK_ICD_FILENAMES -u LIBGL_DRIVERS_PATH -u GBM_BACKENDS_PATH -u __EGL_VENDOR_LIBRARY_FILENAMES \
+        LIBGL_ALWAYS_SOFTWARE=1 \
+        GALLIUM_DRIVER=llvmpipe \
+        WLR_BACKENDS=headless \
+        WLR_LIBINPUT_NO_DEVICES=1 \
+        WLR_RENDERER_ALLOW_SOFTWARE=1 \
+        nohup sway -c /tmp/razr-sway.conf >"${XDG_RUNTIME_DIR}/sway.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 50 ]; do
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            if [ -S "$s" ]; then
+                SWAY_SOCK="$(basename "$s")"
+                break
+            fi
+        done
+        [ -n "$SWAY_SOCK" ] && break
+        sleep 0.2
+        i=$((i + 1))
+    done
+
+    if [ -z "$SWAY_SOCK" ]; then
+        echo "ERROR: headless sway Wayland socket did not appear" >&2
+        exit 1
+    fi
+
+    WAYLAND_DISPLAY="$SWAY_SOCK" \
+    XDG_SESSION_TYPE=wayland \
+    XDG_CURRENT_DESKTOP=Hyprland \
+        nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+
+    i=0
+    while [ "$i" -lt 60 ]; do
+        for d in "${XDG_RUNTIME_DIR}"/hypr/*; do
+            if [ -d "$d" ] && [ -S "${d}/.socket.sock" ]; then
+                HYPR_SIG="$(basename "$d")"
+                break
+            fi
+        done
+        for s in "${XDG_RUNTIME_DIR}"/wayland-*; do
+            case "$s" in
+                *.lock) continue ;;
+            esac
+            bn="$(basename "$s")"
+            if [ -S "$s" ] && [ "$bn" != "$SWAY_SOCK" ]; then
+                HYPR_SOCK="$bn"
+                break
+            fi
+        done
+        [ -n "$HYPR_SIG" ] && [ -n "$HYPR_SOCK" ] && break
+        sleep 0.25
+        i=$((i + 1))
+    done
+
+    if [ -z "$HYPR_SIG" ]; then
+        echo "ERROR: Hyprland IPC did not appear" >&2
+        exit 1
+    fi
+    if [ -z "$HYPR_SOCK" ]; then
+        HYPR_SOCK="$SWAY_SOCK"
+    fi
+
+    export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
+    export WAYLAND_DISPLAY="$HYPR_SOCK"
+    hyprctl keyword monitor "WAYLAND-1,preferred,0x0,${SCALE}" >/dev/null 2>&1 || true
 fi
 
 # Persist live Wayland/Hyprland session environment for clipboard and helper tools.
@@ -687,6 +787,7 @@ DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}
 SWAY_DISPLAY=${SWAY_SOCK}
 WAYLAND_DISPLAY=${HYPR_SOCK}
 HYPRLAND_INSTANCE_SIGNATURE=${HYPR_SIG}
+DIRECT_HEADLESS=${DIRECT_HEADLESS}
 MESA_LOADER_DRIVER_OVERRIDE=${MESA_LOADER_DRIVER_OVERRIDE:-}
 GALLIUM_DRIVER=${GALLIUM_DRIVER:-}
 ZINK_KGSL_FALLBACK=${ZINK_KGSL_FALLBACK:-}
@@ -696,12 +797,6 @@ GBM_BACKENDS_PATH=${GBM_BACKENDS_PATH:-}
 __EGL_VENDOR_LIBRARY_FILENAMES=${__EGL_VENDOR_LIBRARY_FILENAMES:-}
 TU_DEBUG=${TU_DEBUG:-}
 ENVEOF
-
-export HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG"
-export WAYLAND_DISPLAY="$HYPR_SOCK"
-
-# Configure nested monitor scale.
-hyprctl keyword monitor "WAYLAND-1,preferred,0x0,${SCALE}" >/dev/null 2>&1 || true
 
 # Launch Omarchy shell bar & plugins.
 if command -v omarchy-launch-shell >/dev/null 2>&1; then
@@ -792,15 +887,37 @@ ensure_container_hw_bridge() {
 #!/system/bin/sh
 echo "$$" > /data/local/nixos/powerd.pid
 REQ="/data/local/nixos/mnt/var/lib/sidesystem/power-profile-req"
+PROF_FILE="/data/local/nixos/mnt/var/lib/sidesystem/power-profile"
+tick=0
+thermal_stepped=0
 while true; do
     if [ -s "$REQ" ]; then
         val="$(head -n 1 "$REQ" 2>/dev/null | tr -d '\r\n ')"
         : > "$REQ" 2>/dev/null || true
+        thermal_stepped=0
         case "$val" in
             power-saver|eco)         /data/local/nixos/bin/sidesystem-ctl profile eco >/dev/null 2>&1 || true ;;
             balanced)                /data/local/nixos/bin/sidesystem-ctl profile balanced >/dev/null 2>&1 || true ;;
             performance|full)        /data/local/nixos/bin/sidesystem-ctl profile full >/dev/null 2>&1 || true ;;
         esac
+    fi
+    # Closed-loop thermal governor (every 2s): gently feather performance clocks before Qualcomm's cliff throttle
+    tick=$((tick + 1))
+    if [ $((tick % 4)) -eq 0 ]; then
+        cur_prof="$(cat "$PROF_FILE" 2>/dev/null | tr -d '\r\n ')"
+        if [ "$cur_prof" = "performance" ]; then
+            soc_mc="$(cat /sys/class/thermal/thermal_zone22/temp 2>/dev/null || echo 0)"
+            batt_mc="$(cat /sys/class/thermal/thermal_zone67/temp 2>/dev/null || echo 0)"
+            if [ "$thermal_stepped" -eq 0 ] && { [ "${soc_mc:-0}" -ge 80000 ] || [ "${batt_mc:-0}" -ge 40000 ]; }; then
+                printf '3532800\n' > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+                printf '9\n' > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+                thermal_stepped=1
+            elif [ "$thermal_stepped" -eq 1 ] && [ "${soc_mc:-0}" -lt 72000 ] && [ "${batt_mc:-0}" -lt 37000 ]; then
+                printf '4320000\n' > /sys/devices/system/cpu/cpufreq/policy6/scaling_max_freq 2>/dev/null || true
+                printf '4\n' > /sys/class/kgsl/kgsl-3d0/min_pwrlevel 2>/dev/null || true
+                thermal_stepped=0
+            fi
+        fi
     fi
     sleep 0.5
 done

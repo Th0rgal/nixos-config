@@ -162,8 +162,15 @@ in
       postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
       postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (old.postFixup or "");
     }))
+    # Patched Aquamarine enabling pure-GPU standalone headless Hyprland via AQ_HEADLESS_DRM_NODE (zero sway / zero llvmpipe)
+    (pkgs.aquamarine.overrideAttrs (old: {
+      pname = "aquamarine-razr";
+      patches = (old.patches or []) ++ [ ./patches/aquamarine-headless-drm.patch ];
+    }))
     vulkan-tools
     mesa-demos
+    (pkgs.llama-cpp.override { vulkanSupport = true; })
+    ffmpeg
     pulseaudio
     android-tools
     # Shared personal desktop & CLI parity

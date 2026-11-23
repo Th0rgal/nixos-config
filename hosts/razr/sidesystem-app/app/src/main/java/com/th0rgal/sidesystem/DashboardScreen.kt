@@ -1878,6 +1878,38 @@ private fun TelemetryGraphCard(
                     strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
                 )
             }
+            if (!compact && (status.socTempC > 0 || status.npuReady)) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val tempStr = if (status.socTempC > 0) "SoC ${status.socTempC}°C · Batt ${status.battTempC}°C" else ""
+                    val wattStr = if (status.powerMw > 0) String.format(Locale.US, "%.1fW", status.powerMw / 1000.0) else ""
+                    val leftMeta = listOf(tempStr, wattStr).filter { it.isNotEmpty() }.joinToString(" · ")
+                    Text(
+                        text = leftMeta,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        ),
+                        color = OrbFgMuted
+                    )
+                    if (status.npuReady) {
+                        Text(
+                            text = "NPU V79 READY",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 10.sp,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = OrbGreen
+                        )
+                    }
+                }
+            }
         }
     }
 }
