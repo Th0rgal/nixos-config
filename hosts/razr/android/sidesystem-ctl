@@ -947,7 +947,13 @@ TIDEOF
         [ -c /dev/fastrpc-cdsp ] || mknod -m 666 /dev/fastrpc-cdsp c 10 106 2>/dev/null || true
         [ -c /dev/fastrpc-cdsp-secure ] || mknod -m 666 /dev/fastrpc-cdsp-secure c 10 107 2>/dev/null || true
         [ -c /dev/uinput ] || mknod -m 666 /dev/uinput c 10 223 2>/dev/null || true
+        [ -c /dev/uhid ] || mknod -m 660 /dev/uhid c 10 239 2>/dev/null || true
         chmod 666 /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure /dev/uinput 2>/dev/null || true
+        for d in sidesystem-upowerd sidesystem-fprintd sidesystem-fido2; do
+            if [ -x "/var/lib/sidesystem/$d" ] && ! pgrep -f "/var/lib/sidesystem/$d" >/dev/null 2>&1; then
+                nohup "/var/lib/sidesystem/$d" >"/var/log/$d.log" 2>&1 </dev/null &
+            fi
+        done
     ' >/dev/null 2>&1 || true
 
     # Start single-instance host-side power-profile request watcher on shared F2FS /var/lib/sidesystem
@@ -966,9 +972,9 @@ TIDEOF
     cat > "${BASE_DIR}/bin/sidesystem-powerd" <<'PWRD'
 #!/system/bin/sh
 echo "$$" > /data/local/nixos/powerd.pid
-REQ="/data/local/nixos/mnt/var/lib/sidesystem/power-profile-req"
-BIO_REQ="/data/local/nixos/mnt/var/lib/sidesystem/bio-req"
-PROF_FILE="/data/local/nixos/mnt/var/lib/sidesystem/power-profile"
+REQ="/data/local/nixos/rootfs/var/lib/sidesystem/power-profile-req"
+BIO_REQ="/data/local/nixos/rootfs/var/lib/sidesystem/bio-req"
+PROF_FILE="/data/local/nixos/rootfs/var/lib/sidesystem/power-profile"
 tick=0
 thermal_stepped=0
 while true; do
@@ -977,7 +983,7 @@ while true; do
         : > "$BIO_REQ" 2>/dev/null || true
         bnonce="${bline%%|*}"
         breason="${bline#*|}"
-        [ -n "$bnonce" ] && am start -n com.th0rgal.sidesystem/.BiometricAuthActivity \
+        [ -n "$bnonce" ] && /system/bin/am start --user 0 -n com.th0rgal.sidesystem/.BiometricAuthActivity \
             --es nonce "$bnonce" --es reason "${breason:-NixOS authentication}" >/dev/null 2>&1 || true
     fi
     if [ -s "$REQ" ]; then
