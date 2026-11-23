@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -40,6 +41,10 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
+        window.attributes = window.attributes.apply {
+            layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        }
 
         setContent {
             SideSystemTheme {
@@ -49,6 +54,7 @@ class MainActivity : ComponentActivity() {
                 val snackbarHostState = remember { SnackbarHostState() }
 
                 var status by remember { mutableStateOf(SideSystemStatus()) }
+                var telemetryHistory by remember { mutableStateOf<List<TelemetrySample>>(emptyList()) }
                 var peripherals by remember { mutableStateOf<List<PeripheralDevice>>(emptyList()) }
                 var hasBtPerm by remember {
                     mutableStateOf(SideSystemCtl.hasBluetoothPermission(context))
@@ -72,7 +78,13 @@ class MainActivity : ComponentActivity() {
                     try {
                         hasBtPerm = SideSystemCtl.hasBluetoothPermission(context)
                         peripherals = SideSystemCtl.queryPeripherals(context)
-                        status = SideSystemCtl.fetchStatus(context)
+                        val next = SideSystemCtl.fetchStatus(context)
+                        status = next
+                        telemetryHistory = if (next.containerRunning) {
+                            (telemetryHistory + TelemetrySample(next.cpuPct, next.memPct)).takeLast(36)
+                        } else {
+                            emptyList()
+                        }
                     } finally {
                         if (showSpinner) isRefreshing = false
                     }
@@ -127,12 +139,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Poll status every 5 seconds while foregrounded
+                // Poll live telemetry every 2.5s while running (5s when stopped)
                 LaunchedEffect(lifecycleOwner) {
                     lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                         while (isActive) {
                             refreshAll(showSpinner = false)
-                            delay(5_000L)
+                            delay(if (status.containerRunning) 2_500L else 5_000L)
                         }
                     }
                 }
@@ -299,6 +311,7 @@ class MainActivity : ComponentActivity() {
 
                 DashboardScreen(
                     status = status,
+                    telemetryHistory = telemetryHistory,
                     peripherals = peripherals,
                     hasBluetoothPermission = hasBtPerm,
                     isRefreshing = isRefreshing,

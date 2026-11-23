@@ -185,6 +185,31 @@ read_memory_mb() {
     MEM_USED_MB=$((mem_used_kb / 1024))
 }
 
+read_cpu_pct() {
+    CPU_PCT=0
+    cpu_cache="${BASE_DIR}/.cpu_prev"
+    read -r _ u n s id io irq sirq st _ < /proc/stat 2>/dev/null || return 0
+    is_uint "$u" || return 0
+    is_uint "$id" || return 0
+    total=$((u + n + s + id + ${io:-0} + ${irq:-0} + ${sirq:-0} + ${st:-0}))
+    idle=$((id + ${io:-0}))
+
+    if [ -r "$cpu_cache" ]; then
+        read -r prev_total prev_idle < "$cpu_cache" 2>/dev/null || true
+        if is_uint "${prev_total:-}" && is_uint "${prev_idle:-}"; then
+            dt=$((total - prev_total))
+            di=$((idle - prev_idle))
+            if [ "$dt" -gt 0 ]; then
+                busy=$((dt - di))
+                [ "$busy" -lt 0 ] && busy=0
+                CPU_PCT=$(( (busy * 100) / dt ))
+                [ "$CPU_PCT" -gt 100 ] && CPU_PCT=100
+            fi
+        fi
+    fi
+    printf '%s %s\n' "$total" "$idle" > "$cpu_cache" 2>/dev/null || true
+}
+
 detect_network() {
     NET_TYPE="offline"
     NET_IP=""
@@ -239,6 +264,7 @@ detect_network() {
 cmd_status() {
     load_state
     read_memory_mb
+    read_cpu_pct
     detect_network
 
     c_running="false"
@@ -291,7 +317,7 @@ EOF
         autostart_val="true"
     fi
 
-    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s"}\n' \
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s"}\n' \
         "$c_running" \
         "$c_pid" \
         "$(json_escape "$c_uptime")" \
@@ -306,6 +332,7 @@ EOF
         "$SSH_PORT" \
         "$MEM_USED_MB" \
         "$MEM_TOTAL_MB" \
+        "$CPU_PCT" \
         "$(json_escape "$PROFILE")" \
         "$autostart_val" \
         "$(json_escape "$GPU_MODE")"

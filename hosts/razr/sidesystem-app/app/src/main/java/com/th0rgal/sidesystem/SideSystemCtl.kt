@@ -66,8 +66,8 @@ enum class PowerProfile(val cliValue: String, val label: String) {
 }
 
 enum class GpuMode(val cliValue: String, val label: String, val subtitle: String) {
-    LLVMPIPE("llvmpipe", "CPU llvmpipe", "Software"),
-    TURNIP("turnip", "GPU Turnip", "Adreno HW");
+    LLVMPIPE("sw", "CPU llvmpipe", "Software"),
+    TURNIP("hw", "GPU Turnip", "Adreno HW");
 
     companion object {
         fun fromString(raw: String?): GpuMode {
@@ -79,6 +79,11 @@ enum class GpuMode(val cliValue: String, val label: String, val subtitle: String
     }
 }
 
+data class TelemetrySample(
+    val cpuPct: Int,
+    val memPct: Int
+)
+
 data class SideSystemStatus(
     val containerRunning: Boolean = false,
     val desktopRunning: Boolean = false,
@@ -89,6 +94,7 @@ data class SideSystemStatus(
     val scale: DisplayScale = DisplayScale.ONE_X,
     val memUsedMb: Int = 0,
     val memTotalMb: Int = 0,
+    val cpuPct: Int = 0,
     val powerProfile: PowerProfile = PowerProfile.BALANCED,
     val gpuMode: GpuMode = GpuMode.LLVMPIPE,
     val networkType: String = "Offline",
@@ -105,6 +111,9 @@ data class SideSystemStatus(
 
     val memFraction: Float
         get() = if (memTotalMb > 0) (memUsedMb.toFloat() / memTotalMb.toFloat()).coerceIn(0f, 1f) else 0f
+
+    val memPct: Int
+        get() = (memFraction * 100f).toInt().coerceIn(0, 100)
 }
 
 data class PeripheralDevice(
@@ -211,9 +220,9 @@ object SideSystemCtl {
         return parseStatusJson(result.stdout, fallbackNet, fallbackIp)
     }
 
-    suspend fun containerStart(): CommandResult = runCtl("start", timeoutSeconds = 45L)
-    suspend fun containerRestart(): CommandResult = runCtl("restart", timeoutSeconds = 60L)
-    suspend fun containerStop(): CommandResult = runCtl("stop", timeoutSeconds = 30L)
+    suspend fun containerStart(): CommandResult = runCtl("container", "start", timeoutSeconds = 45L)
+    suspend fun containerRestart(): CommandResult = runCtl("container", "restart", timeoutSeconds = 60L)
+    suspend fun containerStop(): CommandResult = runCtl("container", "stop", timeoutSeconds = 30L)
 
     suspend fun desktopStart(): CommandResult = runCtl("desktop", "start", timeoutSeconds = 45L)
     suspend fun desktopRestart(): CommandResult = runCtl("desktop", "restart", timeoutSeconds = 45L)
@@ -223,7 +232,7 @@ object SideSystemCtl {
         runCtl("autostart", if (enabled) "on" else "off")
 
     suspend fun applyDisplay(resolution: DisplayResolution, scale: DisplayScale): CommandResult =
-        runCtl("display", resolution.cliValue, scale.cliValue, timeoutSeconds = 45L)
+        runCtl("desktop", "start", resolution.cliValue, scale.cliValue, timeoutSeconds = 45L)
 
     suspend fun setProfile(profile: PowerProfile): CommandResult =
         runCtl("profile", profile.cliValue)
@@ -290,7 +299,7 @@ object SideSystemCtl {
             val autostart = obj.optBoolean("autostart", false)
 
             val resolution = DisplayResolution.fromString(
-                obj.optString("resolution", obj.optString("display_resolution", "1080p"))
+                obj.optString("resolution", obj.optString("display_resolution", obj.optString("display_mode", "1080p")))
             )
             val scale = DisplayScale.fromAny(
                 obj.opt("scale") ?: obj.opt("display_scale") ?: 1
@@ -298,6 +307,7 @@ object SideSystemCtl {
 
             val memUsed = obj.optInt("mem_used_mb", 0)
             val memTotal = obj.optInt("mem_total_mb", 0)
+            val cpuPct = obj.optInt("cpu_pct", 0).coerceIn(0, 100)
 
             val profile = PowerProfile.fromString(
                 obj.optString("profile", obj.optString("power_profile", "balanced"))
@@ -340,6 +350,7 @@ object SideSystemCtl {
                 scale = scale,
                 memUsedMb = memUsed,
                 memTotalMb = memTotal,
+                cpuPct = cpuPct,
                 powerProfile = profile,
                 gpuMode = gpuMode,
                 networkType = netType,

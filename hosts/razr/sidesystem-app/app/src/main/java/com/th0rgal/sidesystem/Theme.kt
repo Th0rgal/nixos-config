@@ -10,76 +10,73 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-object StarshipColors {
-    val Background = Color(0xFF0D1117)
-    val SurfaceCard = Color(0xFF161B22)
-    val SurfaceElevated = Color(0xFF1E242E)
-    val Border = Color(0xFF2A3240)
-    val BorderSubtle = Color(0xFF212834)
+val OrbBg = Color(0xFF141414)
+val OrbSurface = Color(0xFF181818)
+val OrbSurfaceHover = Color(0xFF1E1E1E)
+val OrbBorder = Color(0xFF262626)
+val OrbFgStrong = Color(0xFFF4F4F5)
+val OrbFgMuted = Color(0xFF8E8E93)
+val OrbFgSubtle = Color(0xFF636366)
+val OrbGreen = Color(0xFF199E70)
+val OrbAmber = Color(0xFFC98500)
+val OrbBlue = Color(0xFF86AEE4)
+val OrbRed = Color(0xFFE05D5D)
 
-    val Accent = Color(0xFF7CC6FE)
-    val AccentDim = Color(0xFF1A2D3F)
-
-    val Running = Color(0xFF4ADE80)
-    val RunningDim = Color(0xFF132A1E)
-
-    val Degraded = Color(0xFFFBBF24)
-    val DegradedDim = Color(0xFF2D2312)
-
-    val Stopped = Color(0xFFF87171)
-    val StoppedDim = Color(0xFF2F171A)
-
-    val TextPrimary = Color(0xFFE6EDF3)
-    val TextSecondary = Color(0xFF8B949E)
-    val TextMuted = Color(0xFF656F7A)
-}
-
-private val StarshipDarkColorScheme = darkColorScheme(
-    primary = StarshipColors.Accent,
-    onPrimary = Color(0xFF061523),
-    primaryContainer = StarshipColors.AccentDim,
-    onPrimaryContainer = StarshipColors.Accent,
-    secondary = StarshipColors.Running,
-    onSecondary = Color(0xFF072112),
-    secondaryContainer = StarshipColors.RunningDim,
-    onSecondaryContainer = StarshipColors.Running,
-    tertiary = StarshipColors.Degraded,
-    onTertiary = Color(0xFF231703),
-    tertiaryContainer = StarshipColors.DegradedDim,
-    onTertiaryContainer = StarshipColors.Degraded,
-    error = StarshipColors.Stopped,
-    onError = Color(0xFF2A090C),
-    errorContainer = StarshipColors.StoppedDim,
-    onErrorContainer = StarshipColors.Stopped,
-    background = StarshipColors.Background,
-    onBackground = StarshipColors.TextPrimary,
-    surface = StarshipColors.SurfaceCard,
-    onSurface = StarshipColors.TextPrimary,
-    surfaceVariant = StarshipColors.SurfaceElevated,
-    onSurfaceVariant = StarshipColors.TextSecondary,
-    outline = StarshipColors.Border,
-    outlineVariant = StarshipColors.BorderSubtle
+private val OrbDarkColorScheme = darkColorScheme(
+    primary = OrbFgStrong,
+    onPrimary = OrbBg,
+    primaryContainer = OrbSurfaceHover,
+    onPrimaryContainer = OrbFgStrong,
+    secondary = OrbBlue,
+    onSecondary = OrbBg,
+    secondaryContainer = OrbSurfaceHover,
+    onSecondaryContainer = OrbFgStrong,
+    tertiary = OrbGreen,
+    onTertiary = OrbBg,
+    tertiaryContainer = OrbSurfaceHover,
+    onTertiaryContainer = OrbGreen,
+    error = OrbRed,
+    onError = OrbBg,
+    errorContainer = Color(0xFF2A1616),
+    onErrorContainer = OrbRed,
+    background = OrbBg,
+    onBackground = OrbFgStrong,
+    surface = OrbSurface,
+    onSurface = OrbFgStrong,
+    surfaceVariant = OrbSurfaceHover,
+    onSurfaceVariant = OrbFgMuted,
+    outline = OrbBorder,
+    outlineVariant = OrbBorder
 )
 
-private val StarshipTypography = Typography(
+private val OrbTypography = Typography(
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.5).sp
+    ),
     headlineSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = (-0.2).sp
+        fontSize = 21.sp,
+        lineHeight = 26.sp,
+        letterSpacing = (-0.35).sp
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 22.sp,
+        letterSpacing = (-0.2).sp
     ),
     titleSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 13.sp,
-        lineHeight = 18.sp
+        lineHeight = 18.sp,
+        letterSpacing = (-0.1).sp
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -96,29 +93,31 @@ private val StarshipTypography = Typography(
     labelLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
+        fontSize = 14.sp,
+        lineHeight = 18.sp,
+        letterSpacing = (-0.1).sp
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.4.sp
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.1.sp
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 14.sp
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        fontFeatureSettings = "tnum"
     )
 )
 
 @Composable
 fun SideSystemTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = StarshipDarkColorScheme,
-        typography = StarshipTypography,
+        colorScheme = OrbDarkColorScheme,
+        typography = OrbTypography,
         content = content
     )
 }
