@@ -136,36 +136,49 @@ in
   system.stateVersion = "25.05";
 
   environment.systemPackages = with pkgs; [
-    # Pure-Wayland headless host + remote viewer server (`sway` + `wayvnc`), GPU & audio tooling
+    # Pure-Wayland headless streaming (`sunshine` UDP + `wayvnc` input/fallback), GPU & audio tooling
+    sunshine
     sway
     wayvnc
     weston
     cage
     mesa
     # Adreno 830 v2 (/dev/kgsl-3d0) patched Mesa Turnip + Zink (ZINK_KGSL_FALLBACK=1 + KHR_display fix)
-    ((pkgs.mesa.override {
-      galliumDrivers = [ "zink" "llvmpipe" "virgl" ];
-      vulkanDrivers = [ "freedreno" ];
-      vulkanLayers = [];
-    }).overrideAttrs (old: {
-      pname = "mesa-razr-kgsl";
-      patches = (old.patches or []) ++ [ ./patches/mesa-razr-kgsl.patch ];
-      mesonFlags = (builtins.filter (f:
-        !(lib.hasPrefix "-Dgallium-rusticl=" f) &&
-        !(lib.hasPrefix "-Dtools=" f) &&
-        !(lib.hasPrefix "-Dteflon=" f)
-      ) (old.mesonFlags or [])) ++ [
-        "-Dgallium-rusticl=false"
-        "-Dtools="
-        "-Dteflon=false"
-      ];
-      postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
-      postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (old.postFixup or "");
-    }))
+    (
+      (pkgs.mesa.override {
+        galliumDrivers = [
+          "zink"
+          "llvmpipe"
+          "virgl"
+        ];
+        vulkanDrivers = [ "freedreno" ];
+        vulkanLayers = [ ];
+      }).overrideAttrs
+        (old: {
+          pname = "mesa-razr-kgsl";
+          patches = (old.patches or [ ]) ++ [ ./patches/mesa-razr-kgsl.patch ];
+          mesonFlags =
+            (builtins.filter (
+              f:
+              !(lib.hasPrefix "-Dgallium-rusticl=" f)
+              && !(lib.hasPrefix "-Dtools=" f)
+              && !(lib.hasPrefix "-Dteflon=" f)
+            ) (old.mesonFlags or [ ]))
+            ++ [
+              "-Dgallium-rusticl=false"
+              "-Dtools="
+              "-Dteflon=false"
+            ];
+          postInstall = (old.postInstall or "") + "\nmkdir -p $spirv2dxil $opencl $cross_tools\n";
+          postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] (
+            old.postFixup or ""
+          );
+        })
+    )
     # Patched Aquamarine enabling pure-GPU standalone headless Hyprland via AQ_HEADLESS_DRM_NODE (zero sway / zero llvmpipe)
     (pkgs.aquamarine.overrideAttrs (old: {
       pname = "aquamarine-razr";
-      patches = (old.patches or []) ++ [ ./patches/aquamarine-headless-drm.patch ];
+      patches = (old.patches or [ ]) ++ [ ./patches/aquamarine-headless-drm.patch ];
     }))
     vulkan-tools
     mesa-demos
