@@ -486,11 +486,11 @@ cmd_desktop_stop() {
     log "Stopping desktop processes (wayvnc, omarchy-launch-shell, quickshell, Hyprland, sway)..."
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /run/current-system/sw/bin/su - "$CONTAINER_USER" -c '
         PATH="/run/current-system/sw/bin:/usr/bin:/bin"
-        for proc in wayvnc omarchy-launch-shell quickshell swaybg Hyprland sway; do
+        for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
             pkill -TERM -f "$proc" 2>/dev/null || true
         done
         sleep 1
-        for proc in wayvnc omarchy-launch-shell quickshell swaybg Hyprland sway; do
+        for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
             pkill -KILL -f "$proc" 2>/dev/null || true
         done
         rm -rf /tmp/xdg-razr/hypr /tmp/xdg-razr/wayland-* /tmp/xdg-razr/sway-ipc.* 2>/dev/null || true
@@ -539,11 +539,11 @@ export PATH="/run/current-system/sw/bin:/etc/profiles/per-user/${USER:-thomas}/b
 export XDG_RUNTIME_DIR="/tmp/xdg-razr"
 
 # Clean up any previous desktop stack (match wrapped binaries like .Hyprland-wrapped too).
-for proc in wayvnc omarchy-launch-shell quickshell swaybg Hyprland sway; do
+for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
     pkill -TERM -f "$proc" 2>/dev/null || true
 done
 sleep 1
-for proc in wayvnc omarchy-launch-shell quickshell swaybg Hyprland sway; do
+for proc in wayvnc omarchy-launch-shell quickshell swaybg start-hyprland Hyprland sway; do
     pkill -KILL -f "$proc" 2>/dev/null || true
 done
 
@@ -633,11 +633,15 @@ else
     unset MESA_LOADER_DRIVER_OVERRIDE ZINK_KGSL_FALLBACK TU_DEBUG VK_ICD_FILENAMES LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
 fi
 
-# Launch Hyprland nested on sway's Wayland socket.
+# Launch Hyprland nested on sway's Wayland socket via start-hyprland (avoids startup warning banner).
+HYPR_LAUNCHER="Hyprland"
+if command -v start-hyprland >/dev/null 2>&1; then
+    HYPR_LAUNCHER="start-hyprland"
+fi
 WAYLAND_DISPLAY="$SWAY_SOCK" \
 XDG_SESSION_TYPE=wayland \
 XDG_CURRENT_DESKTOP=Hyprland \
-    nohup Hyprland >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
+    nohup "$HYPR_LAUNCHER" >"${XDG_RUNTIME_DIR}/hyprland.log" 2>&1 </dev/null &
 
 HYPR_SIG=""
 HYPR_SOCK=""
