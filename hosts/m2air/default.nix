@@ -68,6 +68,7 @@ in
     ./hardware.nix
     ./secrets.nix
     ./bench.nix
+    ./gnosisvpn.nix
   ];
 
   networking.hostName = "m2air";
@@ -184,6 +185,32 @@ in
 
   systemd.packages = [ rencal ];
   systemd.user.services.rencal-notifierd.wantedBy = [ "graphical-session.target" ];
+
+  # Helium/Chromium managed policies: keep Omarchy's device color-scheme policy,
+  # replace KISS Translator with FluentRead (configured for Orb Router builtin/fast).
+  environment.etc."chromium/policies/managed".source =
+    pkgs.runCommand "m2air-chromium-managed-policies" { }
+      ''
+        mkdir -p "$out"
+        cat > "$out/10-omarchnix-color-scheme.json" <<'EOF'
+        {
+          "BrowserColorScheme": "device"
+        }
+        EOF
+        cat > "$out/20-fluentread.json" <<'EOF'
+        {
+          "ExtensionSettings": {
+            "bdiifdefkgmcblbcghdlonllpjhhjgof": {
+              "installation_mode": "blocked"
+            },
+            "djnlaiohfaaifbibleebjggkghlmcpcj": {
+              "installation_mode": "force_installed",
+              "update_url": "https://clients2.google.com/service/update2/crx"
+            }
+          }
+        }
+        EOF
+      '';
 
   environment.systemPackages = with pkgs; [
     android-tools

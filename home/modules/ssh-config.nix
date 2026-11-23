@@ -57,7 +57,7 @@ let
     # The offline break-glass key is never offered automatically; use it only
     # by hand in an emergency: `ssh -i ~/.ssh/thomas-breakglass <host>`.
     ${lib.concatMapStringsSep "\n" renderFleetHost fleet.palomaFleet}
-    Match host "${lib.concatStringsSep "," allPalomaAliases}" exec "test -S /run/user/%i/yubikey-agent/yubikey-agent.sock"
+    Match originalhost "${lib.concatStringsSep "," allPalomaAliases}" exec "test -S /run/user/%i/yubikey-agent/yubikey-agent.sock"
       IdentityAgent /run/user/%i/yubikey-agent/yubikey-agent.sock
 
     Host ${lib.concatStringsSep " " allPalomaAliases}

@@ -67,6 +67,39 @@ in
     done
   '';
 
+  # Helium's native new-tab page reads the user's uploaded photo from this file.
+  systemd.user.services.helium-wallpaper = {
+    Unit.Description = "Match the Helium new-tab wallpaper to the Omarchy theme";
+    Service = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "helium-wallpaper" ''
+        set -eu
+        current="''${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme/colors.toml"
+        profile="''${XDG_CONFIG_HOME:-$HOME/.config}/net.imput.helium/Default"
+        [ -f "$current" ] && [ -f "$profile/background.jpg" ] || exit 0
+        if ${pkgs.gnugrep}/bin/grep -Eq '^mode[[:space:]]*=[[:space:]]*"light"' "$current"; then
+          photo=kazakhstan-charyn-canyon-peaks.webp
+        else
+          photo=bologna-dome.webp
+        fi
+        src="$HOME/Pictures/Wallpapers/$photo"
+        [ -f "$src" ] || exit 0
+        ${pkgs.diffutils}/bin/cmp -s "$src" "$profile/background.jpg" && exit 0
+        tmp=$(${pkgs.coreutils}/bin/mktemp "$profile/.background.XXXXXX")
+        trap '${pkgs.coreutils}/bin/rm -f "$tmp"' EXIT
+        ${pkgs.coreutils}/bin/cp "$src" "$tmp"
+        ${pkgs.coreutils}/bin/mv -fT "$tmp" "$profile/background.jpg"
+      '';
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  systemd.user.paths.helium-wallpaper = {
+    Unit.Description = "Watch Omarchy theme changes for Helium";
+    Path.PathChanged = "%h/.local/state/omarchy/current/theme.generation";
+    Install.WantedBy = [ "default.target" ];
+  };
+
   # LaTeX for the Verity report template (pdflatex + latexmk). A hand-picked set on
   # top of scheme-small: about 0.7 GiB of closure against 5 GiB+ for texliveFull.
   # Add a package here when a build stops on "File `x.sty' not found".
@@ -87,6 +120,7 @@ in
     ]))
     # PDF viewer, as in Omarchy's own defaults (its window rules already float it).
     pkgs.evince
+    pkgs.imv
   ];
 
   programs.omarchnix = {
@@ -188,7 +222,23 @@ in
       "x-scheme-handler/ton" = [ "org.telegram.desktop.desktop" ];
       "application/vnd.anthropic.mcpb" = [ "com.anthropic.Claude.desktop" ];
       "application/vnd.anthropic.skill" = [ "com.anthropic.Claude.desktop" ];
-    };
+    }
+    // lib.genAttrs [
+      "image/avif"
+      "image/bmp"
+      "image/gif"
+      "image/heic"
+      "image/heif"
+      "image/jpeg"
+      "image/jxl"
+      "image/png"
+      "image/qoi"
+      "image/svg+xml"
+      "image/tiff"
+      "image/tiff-fx"
+      "image/webp"
+      "image/x-farbfeld"
+    ] (_: [ "imv.desktop" ]);
   };
 
   # Present Vesktop as "Discord" with the official Discord icon in Spotlight & Dock.

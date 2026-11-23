@@ -57,7 +57,7 @@ has() { [ "$(yq ".$1 // \"\"" "$plain")" != "" ]; }
 put_file() { # key path
   if has "$1"; then echo "kept    $1"; return; fi
   if [ -s "$2" ]; then
-    V="$(cat "$2")" yq -i ".$1 = strenv(V)" "$plain"
+    SOURCE_FILE="$2" yq -i ".$1 = load_str(strenv(SOURCE_FILE))" "$plain"
     echo "adopted $1 from $2"
   else
     echo "skipped $1 ($2 not found)"
