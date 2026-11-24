@@ -8,18 +8,11 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Bundle
-import android.text.Editable
-import android.text.InputType
-import android.text.TextWatcher
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.View
 import android.view.WindowManager
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -44,8 +37,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -62,16 +57,27 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -82,6 +88,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -90,13 +97,13 @@ import kotlin.math.roundToInt
 /**
  * Full-screen embedded NixOS desktop viewer inside SideSystem.
  *
- * - Automatically syncs Hyprland's HEADLESS-1 output to the exact aspect ratio and crisp
- *   HiDPI scale of the Razr's current screen (inner 2992x1224 or outer cover 1272x1080,
- *   portrait or landscape) via `hyprctl keyword monitor`.
+ * - Automatically syncs Hyprland's HEADLESS-1 output to the exact aspect ratio and
+ *   Hyprland-valid scale (1.0 / 1.25) of the Razr's current screen via Lua `hyprctl eval`.
  * - Renders loopback RFB 3.8 directly onto a hardware-accelerated SurfaceView (0 Compose
  *   recomposition per frame).
- * - Provides a collapsible frosted side-edge pill for Keyboard (+ sticky modifiers) and
- *   Hand-as-Mouse (Trackpad vs Direct Touch) toggle.
+ * - Uses native Compose BasicTextField + FocusRequester + LocalSoftwareKeyboardController
+ *   so tapping Keys reliably opens the full normal Android keyboard (Gboard) alongside a
+ *   floating sticky-modifier & nav bar (Esc, Tab, Ctrl, Opt, Cmd, arrows).
  */
 class DesktopActivity : ComponentActivity() {
 
@@ -121,7 +128,6 @@ class DesktopActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var rfb: RfbClient? = null
     private var desktopView: DesktopSurfaceView? = null
-    private var hiddenInput: EditText? = null
 
     private var connectionText by mutableStateOf("Connecting…")
     private var isConnected by mutableStateOf(false)
@@ -248,7 +254,8 @@ class DesktopActivity : ComponentActivity() {
         val physW = bounds.width().coerceAtLeast(320)
         val physH = bounds.height().coerceAtLeast(320)
 
-        // Pick an exact-aspect-ratio crisp resolution (~1.85M px) for 60fps efficiency & sharp text.
+        // Pick an exact-aspect-ratio crisp resolution (~1.85M px) with dimensions divisible by 8
+        // and Hyprland-valid scale (1.0 or 1.25) so Hyprland never emits an invalid-scale warning.
         val maxPixels = 1_850_000.0
         val currentPixels = physW.toDouble() * physH.toDouble()
         val downscale = if (currentPixels > maxPixels) {
@@ -259,11 +266,7 @@ class DesktopActivity : ComponentActivity() {
         val targetW = ((physW / downscale).roundToInt() / 8) * 8
         val targetH = ((physH / downscale).roundToInt() / 8) * 8
         val minDim = minOf(targetW, targetH)
-        // Hyprland requires exact integer-friendly fractional scales (1.0 / 1.25 / 1.5).
-        val hyprScale = when {
-            minDim <= 960 -> "1.0"
-            else -> "1.25"
-        }
+        val hyprScale = if (minDim <= 960) "1.0" else "1.25"
 
         scope.launch {
             val d = '$'
@@ -279,34 +282,6 @@ class DesktopActivity : ComponentActivity() {
             try {
                 Runtime.getRuntime().exec(arrayOf("su", "-c", cmd)).waitFor()
             } catch (_: Exception) {}
-        }
-    }
-
-    private fun toggleKeyboard() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
-        val input = hiddenInput ?: return
-        keyboardVisible = !keyboardVisible
-        if (keyboardVisible) {
-            scope.launch {
-                try {
-                    Runtime.getRuntime().exec(
-                        arrayOf("su", "-c", "settings put secure show_ime_with_hard_keyboard 1")
-                    ).waitFor()
-                } catch (_: Exception) {}
-            }
-            input.post {
-                input.isFocusable = true
-                input.isFocusableInTouchMode = true
-                input.requestFocus()
-                WindowInsetsControllerCompat(window, input).show(WindowInsetsCompat.Type.ime())
-                @Suppress("DEPRECATION")
-                imm.showSoftInput(input, InputMethodManager.SHOW_FORCED)
-            }
-        } else {
-            WindowInsetsControllerCompat(window, input).hide(WindowInsetsCompat.Type.ime())
-            imm.hideSoftInputFromWindow(input.windowToken, 0)
-            input.clearFocus()
-            hideSystemBars()
         }
     }
 
@@ -370,8 +345,24 @@ class DesktopActivity : ComponentActivity() {
 
     @Composable
     private fun DesktopOverlayRoot() {
-        val pillBg = OrbSurface.copy(alpha = 0.88f)
+        val pillBg = OrbSurface.copy(alpha = 0.90f)
         val pillBorder = OrbBorder
+        val focusRequester = remember { FocusRequester() }
+        val keyboardController = LocalSoftwareKeyboardController.current
+        var imeSentinel by remember { mutableStateOf(TextFieldValue(" ", selection = TextRange(1))) }
+
+        LaunchedEffect(keyboardVisible) {
+            if (keyboardVisible) {
+                delay(60)
+                try {
+                    focusRequester.requestFocus()
+                } catch (_: Exception) {}
+                keyboardController?.show()
+            } else {
+                keyboardController?.hide()
+                hideSystemBars()
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -387,62 +378,46 @@ class DesktopActivity : ComponentActivity() {
                         isHandMouse = { handMouseEnabled },
                         onPointer = { x, y, mask -> rfb?.sendPointerEvent(x, y, mask) }
                     ).also { desktopView = it }
-                },
-                update = { it.invalidateCursorOverlay() }
+                }
             )
 
-            // 2. Invisible focusable EditText with sentinel space so Android soft keyboards
-            //    (Gboard, etc.) reliably open and deliver both Unicode text and Backspace.
-            AndroidView(
-                modifier = Modifier.size(1.dp),
-                factory = { ctx ->
-                    EditText(ctx).apply {
-                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                        imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        alpha = 0f
-                        isCursorVisible = false
-                        setText(" ")
-                        setSelection(1)
-                        setOnKeyListener { _, keyCode, event ->
-                            if (event.action == KeyEvent.ACTION_DOWN) {
-                                val ks = androidKeyToX11(keyCode, event)
-                                if (ks != 0) {
-                                    sendKeyWithStickyModifiers(ks)
-                                    return@setOnKeyListener true
-                                }
-                            }
-                            false
+            // 2. Native Compose BasicTextField with sentinel space so Android's normal
+            //    Gboard soft keyboard opens 100% reliably and delivers both text & Backspace.
+            BasicTextField(
+                value = imeSentinel,
+                onValueChange = { next ->
+                    val txt = next.text
+                    when {
+                        txt.isEmpty() -> {
+                            sendKeyWithStickyModifiers(XK_BACKSPACE)
                         }
-                        addTextChangedListener(object : TextWatcher {
-                            private var resetting = false
-                            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                                if (resetting || s == null) return
-                                if (s.isEmpty() && before > 0) {
-                                    sendKeyWithStickyModifiers(XK_BACKSPACE)
-                                    resetting = true
-                                    setText(" ")
-                                    setSelection(1)
-                                    resetting = false
-                                    return
-                                }
-                                if (count > 0) {
-                                    val added = s.subSequence(start, start + count)
-                                    for (ch in added) {
-                                        sendKeyWithStickyModifiers(unicodeToX11Keysym(ch))
-                                    }
-                                    resetting = true
-                                    setText(" ")
-                                    setSelection(1)
-                                    resetting = false
-                                }
+                        txt.length > 1 -> {
+                            val typed = if (txt.startsWith(" ")) txt.substring(1) else txt
+                            for (ch in typed) {
+                                sendKeyWithStickyModifiers(unicodeToX11Keysym(ch))
                             }
-                            override fun afterTextChanged(s: Editable?) {}
-                        })
-                    }.also { hiddenInput = it }
-                }
+                        }
+                        txt != " " -> {
+                            sendKeyWithStickyModifiers(unicodeToX11Keysym(txt[0]))
+                        }
+                    }
+                    imeSentinel = TextFieldValue(" ", selection = TextRange(1))
+                },
+                singleLine = true,
+                cursorBrush = SolidColor(Color.Transparent),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Send
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = { sendKeyWithStickyModifiers(XK_RETURN) },
+                    onDone = { sendKeyWithStickyModifiers(XK_RETURN) }
+                ),
+                modifier = Modifier
+                    .size(2.dp)
+                    .alpha(0.01f)
+                    .focusRequester(focusRequester)
             )
 
             // 3. Connection status badge while connecting/reconnecting
@@ -466,7 +441,7 @@ class DesktopActivity : ComponentActivity() {
                 }
             }
 
-            // 4. Right-edge collapsible side overlay (Keyboard, Hand-as-Mouse, Sync Res, Close)
+            // 4. Right-edge collapsible side overlay (Keyboard, Hand-as-Mouse, Res Priority, Fit, Close)
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
@@ -518,16 +493,13 @@ class DesktopActivity : ComponentActivity() {
                                 icon = Icons.Rounded.Keyboard,
                                 label = "Keys",
                                 active = keyboardVisible,
-                                onClick = { toggleKeyboard() }
+                                onClick = { keyboardVisible = !keyboardVisible }
                             )
                             OverlayRailButton(
                                 icon = if (handMouseEnabled) Icons.Rounded.Mouse else Icons.Rounded.TouchApp,
                                 label = if (handMouseEnabled) "Mouse" else "Touch",
                                 active = handMouseEnabled,
-                                onClick = {
-                                    handMouseEnabled = !handMouseEnabled
-                                    desktopView?.invalidateCursorOverlay()
-                                }
+                                onClick = { handMouseEnabled = !handMouseEnabled }
                             )
                             OverlayRailButton(
                                 icon = when (resPriority) {
@@ -564,7 +536,7 @@ class DesktopActivity : ComponentActivity() {
                 }
             }
 
-            // 5. Floating modifier & nav shortcut bar when Keyboard is open
+            // 5. Floating modifier & nav shortcut bar sitting cleanly above the Android soft keyboard
             AnimatedVisibility(
                 visible = keyboardVisible,
                 enter = fadeIn(),
@@ -594,6 +566,7 @@ class DesktopActivity : ComponentActivity() {
                         ModifierKeyChip("Opt", stickyAlt) { stickyAlt = !stickyAlt }
                         ModifierKeyChip("Cmd", stickySuper) { stickySuper = !stickySuper }
                         ModifierKeyChip("Space", false) { sendKeyWithStickyModifiers(0x20) }
+                        ModifierKeyChip("Enter", false) { sendKeyWithStickyModifiers(XK_RETURN) }
                         ModifierKeyChip("←", false) { sendKeyWithStickyModifiers(XK_LEFT) }
                         ModifierKeyChip("↓", false) { sendKeyWithStickyModifiers(XK_DOWN) }
                         ModifierKeyChip("↑", false) { sendKeyWithStickyModifiers(XK_UP) }
@@ -663,7 +636,7 @@ class DesktopActivity : ComponentActivity() {
 
 /**
  * Hardware-accelerated SurfaceView rendering RFB bitmaps with 0 allocations per frame
- * and supporting both Trackpad ("Hand-as-Mouse") and Direct Touch input modes.
+ * and accurate Trackpad ("Hand-as-Mouse") + Direct Touch input modes.
  */
 private class DesktopSurfaceView(
     context: Context,
@@ -679,12 +652,6 @@ private class DesktopSurfaceView(
     private val srcRect = Rect()
     private val dstRect = RectF()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val cursorFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xEEFFFFFF.toInt() }
-    private val cursorRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xCC111111.toInt()
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-    }
 
     // Virtual pointer state in framebuffer coordinates
     private var cursorX: Float = 400f
@@ -724,13 +691,9 @@ private class DesktopSurfaceView(
         if (w != fbW || h != fbH) {
             fbW = w.coerceAtLeast(1)
             fbH = h.coerceAtLeast(1)
-            cursorX = cursorX.coerceIn(0f, fbW - 1f)
-            cursorY = cursorY.coerceIn(0f, fbH - 1f)
+            cursorX = (fbW * 0.5f).coerceIn(0f, fbW - 1f)
+            cursorY = (fbH * 0.5f).coerceIn(0f, fbH - 1f)
         }
-        drawLatest()
-    }
-
-    fun invalidateCursorOverlay() {
         drawLatest()
     }
 
@@ -785,7 +748,6 @@ private class DesktopSurfaceView(
                 moved = false
                 scrollAccumY = 0f
                 if (trackpad) {
-                    // Double-tap-and-hold starts left-button drag
                     if (ev.eventTime - lastTapTime < 260L) {
                         draggingButton = true
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 1)
@@ -793,6 +755,8 @@ private class DesktopSurfaceView(
                 } else {
                     cursorX = viewToFbX(ev.x)
                     cursorY = viewToFbY(ev.y)
+                    // Always warp pointer first before pressing button 1 so Hyprland clicks exact pixel
+                    onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 1)
                 }
             }
@@ -801,7 +765,6 @@ private class DesktopSurfaceView(
                 if (ev.pointerCount == 2) {
                     lastY = (ev.getY(0) + ev.getY(1)) * 0.5f
                     if (!trackpad) {
-                        // Release direct-touch left press when switching to 2-finger scroll
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     }
                 }
@@ -815,22 +778,26 @@ private class DesktopSurfaceView(
                     scrollAccumY += dy
                     val step = 28f
                     while (abs(scrollAccumY) >= step) {
-                        val btn = if (scrollAccumY > 0) 8 else 16 // button 4 (up) / button 5 (down)
+                        val btn = if (scrollAccumY > 0) 8 else 16
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), btn)
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                         scrollAccumY += if (scrollAccumY > 0) -step else step
                     }
                 } else if (trackpad) {
-                    val dx = ev.x - lastX
-                    val dy = ev.y - lastY
+                    val rawDx = ev.x - lastX
+                    val rawDy = ev.y - lastY
                     lastX = ev.x; lastY = ev.y
                     if (hypot((ev.x - downX).toDouble(), (ev.y - downY).toDouble()) > 10.0) moved = true
-                    val speed = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                    val accel = (1.15f + (speed / 28f).coerceAtMost(1.8f))
-                    cursorX = (cursorX + dx * accel).coerceIn(0f, fbW - 1f)
-                    cursorY = (cursorY + dy * accel).coerceIn(0f, fbH - 1f)
+                    // Convert physical screen delta to framebuffer space with smooth natural gain (1.0x..1.65x)
+                    val sx = if (dstRect.width() > 1f) fbW.toFloat() / dstRect.width() else 1f
+                    val sy = if (dstRect.height() > 1f) fbH.toFloat() / dstRect.height() else 1f
+                    val fdx = rawDx * sx
+                    val fdy = rawDy * sy
+                    val speed = hypot(fdx.toDouble(), fdy.toDouble()).toFloat()
+                    val gain = 1.0f + ((speed - 4f).coerceAtLeast(0f) / 36f).coerceAtMost(0.65f)
+                    cursorX = (cursorX + fdx * gain).coerceIn(0f, fbW - 1f)
+                    cursorY = (cursorY + fdy * gain).coerceIn(0f, fbH - 1f)
                     onPointer(cursorX.roundToInt(), cursorY.roundToInt(), if (draggingButton) 1 else 0)
-                    drawLatest()
                 } else {
                     cursorX = viewToFbX(ev.x)
                     cursorY = viewToFbY(ev.y)
@@ -844,7 +811,7 @@ private class DesktopSurfaceView(
                         draggingButton = false
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     } else if (!moved && dur < 280L) {
-                        val btn = if (maxPointers >= 2) 4 else 1 // 2-finger tap = right click, 1-finger = left click
+                        val btn = if (maxPointers >= 2) 4 else 1
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), btn)
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                         if (maxPointers == 1) lastTapTime = ev.eventTime

@@ -300,7 +300,7 @@ object SideSystemCtl {
                 containerObj != null -> containerObj.optBoolean("running")
                 obj.has("container") -> {
                     val v = obj.opt("container")
-                    v == true || v.toString().equals("running", ignoreCase = true)
+                    v == true || v?.toString().equals("running", ignoreCase = true)
                 }
                 else -> false
             }
@@ -311,8 +311,8 @@ object SideSystemCtl {
                 desktopObj != null -> desktopObj.optBoolean("running")
                 obj.has("hyprland") -> {
                     val v = obj.opt("hyprland")
-                    v == true || v.toString().equals("live", ignoreCase = true) ||
-                        v.toString().equals("running", ignoreCase = true)
+                    v == true || v?.toString().equals("live", ignoreCase = true) ||
+                        v?.toString().equals("running", ignoreCase = true)
                 }
                 else -> false
             }
@@ -359,8 +359,8 @@ object SideSystemCtl {
                 obj.has("sshd_running") -> obj.optBoolean("sshd_running")
                 obj.has("sshd") -> {
                     val v = obj.opt("sshd")
-                    v == true || v.toString().equals("on", ignoreCase = true) ||
-                        v.toString().equals("running", ignoreCase = true)
+                    v == true || v?.toString().equals("on", ignoreCase = true) ||
+                        v?.toString().equals("running", ignoreCase = true)
                 }
                 else -> false
             }
