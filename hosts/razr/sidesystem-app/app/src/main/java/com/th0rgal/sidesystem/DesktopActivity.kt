@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -763,6 +765,7 @@ private class DesktopSurfaceView(
     private val onPointer: (Int, Int, Int) -> Unit
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var surfaceReady = false
     @Volatile private var latestBitmap: Bitmap? = null
     @Volatile private var fbW: Int = 1
@@ -798,6 +801,10 @@ private class DesktopSurfaceView(
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // Tell Android not to steal touches along the top status bar (spaces/tray/battery tabs)
+        try {
+            systemGestureExclusionRects = listOf(Rect(0, 0, width, (height * 0.14f).roundToInt().coerceAtMost(200)))
+        } catch (_: Exception) {}
         drawLatest()
     }
 
@@ -856,6 +863,18 @@ private class DesktopSurfaceView(
         return (((vy - dstRect.top) / dstRect.height()) * fbH).coerceIn(0f, fbH - 1f)
     }
 
+    private fun sendCleanClick(x: Int, y: Int, buttonMask: Int) {
+        // Wayland/Quickshell layer-shell bars need wl_pointer.enter before button press,
+        // and a brief hold before release so Qt Quick MouseArea registers onClicked reliably.
+        onPointer(x, y, 0)
+        mainHandler.postDelayed({
+            onPointer(x, y, buttonMask)
+            mainHandler.postDelayed({
+                onPointer(x, y, 0)
+            }, 30L)
+        }, 16L)
+    }
+
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         val trackpad = isHandMouse()
         when (ev.actionMasked) {
@@ -874,9 +893,8 @@ private class DesktopSurfaceView(
                 } else {
                     cursorX = viewToFbX(ev.x)
                     cursorY = viewToFbY(ev.y)
-                    // Always warp pointer first before pressing button 1 so Hyprland clicks exact pixel
+                    // Warp pointer immediately on touch down; click fires cleanly on tap or drag
                     onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
-                    onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 1)
                 }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -884,6 +902,7 @@ private class DesktopSurfaceView(
                 if (ev.pointerCount == 2) {
                     lastY = (ev.getY(0) + ev.getY(1)) * 0.5f
                     if (!trackpad) {
+                        draggingButton = false
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     }
                 }
@@ -915,9 +934,13 @@ private class DesktopSurfaceView(
                     cursorY = (cursorY + rawDy * sy).coerceIn(0f, fbH - 1f)
                     onPointer(cursorX.roundToInt(), cursorY.roundToInt(), if (draggingButton) 1 else 0)
                 } else {
+                    if (hypot((ev.x - downX).toDouble(), (ev.y - downY).toDouble()) > 12.0) {
+                        moved = true
+                        draggingButton = true
+                    }
                     cursorX = viewToFbX(ev.x)
                     cursorY = viewToFbY(ev.y)
-                    onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 1)
+                    onPointer(cursorX.roundToInt(), cursorY.roundToInt(), if (draggingButton) 1 else 0)
                 }
             }
             MotionEvent.ACTION_UP -> {
@@ -926,16 +949,18 @@ private class DesktopSurfaceView(
                     if (draggingButton) {
                         draggingButton = false
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
-                    } else if (!moved && dur < 280L) {
+                    } else if (!moved && dur < 320L) {
                         val btn = if (maxPointers >= 2) 4 else 1
-                        onPointer(cursorX.roundToInt(), cursorY.roundToInt(), btn)
-                        onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
+                        sendCleanClick(cursorX.roundToInt(), cursorY.roundToInt(), btn)
                         if (maxPointers == 1) lastTapTime = ev.eventTime
                     }
                 } else {
-                    if (!moved && maxPointers >= 2 && dur < 320L) {
-                        onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 4)
+                    if (draggingButton) {
+                        draggingButton = false
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
+                    } else if (!moved && dur < 360L) {
+                        val btn = if (maxPointers >= 2) 4 else 1
+                        sendCleanClick(cursorX.roundToInt(), cursorY.roundToInt(), btn)
                     } else {
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     }
