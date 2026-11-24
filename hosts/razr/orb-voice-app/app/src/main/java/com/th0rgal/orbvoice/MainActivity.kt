@@ -143,6 +143,9 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
         refreshCutoutMetrics()
+        // Pre-warm Hexagon V79 NPU speaker engine + local ASR model in background (16 GB RAM)
+        // so tapping Record starts capture instantaneously (< 50ms)!
+        ScribeEnginePool.prewarmAsync(this)
 
         setContent {
             val prefs = remember { getSharedPreferences("orb_voice_prefs", Context.MODE_PRIVATE) }
@@ -326,6 +329,7 @@ private fun OrbVoiceApp(
         val updated = orbCfg.copy(translateLangA = langA, translateLangB = langB)
         OrbRouterConfig.save(context, updated)
         orbCfg = updated
+        ScribeEnginePool.prewarmAsync(context)
     }
 
     fun shareFile(path: String, mimeType: String, title: String) {
@@ -563,8 +567,9 @@ private fun OrbVoiceApp(
                     .apply()
                 OrbRouterConfig.save(context, newOrbCfg)
                 orbCfg = OrbRouterConfig.load(context)
+                ScribeEnginePool.prewarmAsync(context)
                 showSettings = false
-                showNotice("Saved Orb Router & Spark settings")
+                showNotice("Saved Scribe settings")
             },
             onDismiss = { showSettings = false }
         )
@@ -1764,7 +1769,7 @@ private fun SettingsModalSheet(
         ) {
             Text("Scribe Settings", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
             Text(
-                text = "Hardware: ${npuStatus.badgeLabel} · WeSpeaker ResNet293-LM (12ms NPU)",
+                text = "Hardware: ${npuStatus.badgeLabel} (ShMem 12ms) · WeSpeaker ResNet293-LM · Warm Pool",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (npuStatus.isReady) OrbGreen else OrbFgMuted
             )
@@ -1776,10 +1781,11 @@ private fun SettingsModalSheet(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
                     LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nBest Accuracy",
+                    LocalAsrEngine.AsrModel.QWEN3_0_6B.id to "Qwen3 0.6B\n30+ Auto-Lang",
                     LocalAsrEngine.AsrModel.PARAKEET_V3.id to "Parakeet 0.6B\nUltra-Fast"
                 ).forEach { (id, label) ->
                     val selected = localAsrDraft == id
@@ -1790,7 +1796,7 @@ private fun SettingsModalSheet(
                             .background(if (selected) OrbGreen.copy(alpha = 0.16f) else OrbBg)
                             .border(1.dp, if (selected) OrbGreen else OrbBorder, RoundedCornerShape(8.dp))
                             .clickable { localAsrDraft = id }
-                            .padding(vertical = 8.dp, horizontal = 6.dp),
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(

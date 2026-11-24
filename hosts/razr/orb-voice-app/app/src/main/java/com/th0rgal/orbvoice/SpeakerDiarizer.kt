@@ -10,6 +10,8 @@ import android.system.Os
 import android.util.Log
 import java.io.Closeable
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.PI
 import kotlin.math.cos
@@ -71,15 +73,23 @@ object SpeakerDiarizer {
         val backendLabel: String
     ) : Closeable {
 
+        // Reusable off-heap native DirectByteBuffer so ONNX Runtime QNN EP reads input features
+        // without JVM heap pinning/copying on every speaker turn.
+        private val directInputBuf: FloatBuffer = ByteBuffer
+            .allocateDirect(STATIC_FBANK_FRAMES * MEL_BINS * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        private val inputShape = longArrayOf(1L, STATIC_FBANK_FRAMES.toLong(), MEL_BINS.toLong())
+
+        @Synchronized
         fun extractEmbedding(pcm: ShortArray, start: Int = 0, end: Int = pcm.size): FloatArray? {
             val fbank = KaldiFbank80.extractStatic(pcm, start, end, STATIC_FBANK_FRAMES) ?: return null
             return try {
                 val t0 = System.nanoTime()
-                val tensor = OnnxTensor.createTensor(
-                    env,
-                    FloatBuffer.wrap(fbank),
-                    longArrayOf(1L, STATIC_FBANK_FRAMES.toLong(), MEL_BINS.toLong())
-                )
+                directInputBuf.clear()
+                directInputBuf.put(fbank)
+                directInputBuf.flip()
+                val tensor = OnnxTensor.createTensor(env, directInputBuf, inputShape)
                 tensor.use { t ->
                     session.run(mapOf(inputName to t)).use { res ->
                         val raw = res[0].value
@@ -113,56 +123,61 @@ object SpeakerDiarizer {
                 val env = OrtEnvironment.getEnvironment()
                 val npuReady = NpuTranscriptionEngine.probeHardware().isReady
 
-                // 1. Try Qualcomm Hexagon V79 QNN HTP NPU (FP16) with persistent Context Binary cache!
+                // 1. Qualcomm Hexagon V79 QNN HTP NPU (FP16 + Opt Level 3 Context Cache + rpcmem Shared Memory!)
                 if (npuReady) {
                     val nativeLibDir = context.applicationInfo.nativeLibraryDir
                     val cacheFile = File(
                         context.cacheDir,
-                        "qnn_v79_${modelFile.nameWithoutExtension}_${modelFile.length()}.ctx.onnx"
+                        "qnn_v79_opt3_${modelFile.nameWithoutExtension}_${modelFile.length()}.ctx.onnx"
                     )
                     val useCache = cacheFile.exists() && cacheFile.length() > 10_000L
-                    Log.i("OrbVoice", "Probing Hexagon V79 NPU: backend=$nativeLibDir/libQnnHtp.so cached=$useCache")
+                    Log.i("OrbVoice", "Probing Hexagon V79 NPU (Opt3+ShMem): backend=$nativeLibDir/libQnnHtp.so cached=$useCache")
 
-                    try {
-                        val opts = OrtSession.SessionOptions().apply {
-                            setIntraOpNumThreads(2)
-                            addConfigEntry("session.disable_cpu_ep_fallback", "1")
-                            if (!useCache) {
-                                // First launch: compile ONNX graph -> Hexagon V79 HTP Context Binary and save to cacheDir
-                                // Subsequent launches load the cached binary in ~150ms instead of ~15s!
-                                if (cacheFile.exists()) cacheFile.delete()
-                                addConfigEntry("ep.context_enable", "1")
-                                addConfigEntry("ep.context_embed_mode", "1")
-                                addConfigEntry("ep.context_file_path", cacheFile.absolutePath)
-                            }
-                            addQnn(
-                                mapOf(
+                    // When loading a cached context binary, enable Qualcomm FastRPC rpcmem zero-copy shared memory!
+                    val attempts = if (useCache) listOf(true, false) else listOf(false)
+                    for (useSharedMem in attempts) {
+                        try {
+                            val opts = OrtSession.SessionOptions().apply {
+                                setIntraOpNumThreads(2)
+                                addConfigEntry("session.disable_cpu_ep_fallback", "1")
+                                if (!useCache) {
+                                    if (cacheFile.exists()) cacheFile.delete()
+                                    addConfigEntry("ep.context_enable", "1")
+                                    addConfigEntry("ep.context_embed_mode", "1")
+                                    addConfigEntry("ep.context_file_path", cacheFile.absolutePath)
+                                }
+                                val qnnOpts = mutableMapOf(
                                     "backend_path" to "$nativeLibDir/libQnnHtp.so",
                                     "htp_performance_mode" to "burst",
-                                    "enable_htp_fp16_precision" to "1"
+                                    "enable_htp_fp16_precision" to "1",
+                                    "htp_graph_finalization_optimization_mode" to "3",
+                                    "rpc_control_latency" to "10"
                                 )
-                            )
-                        }
-                        val loadPath = if (useCache) cacheFile.absolutePath else modelFile.absolutePath
-                        val session = env.createSession(loadPath, opts)
-                        val inName = session.inputNames.first()
-                        val engine = NeuralSpeakerEngine(env, session, inName, "Hexagon V79 NPU")
-                        // Warm up + verify steady-state NPU inference (~12ms!)
-                        val dummy = ShortArray(SAMPLE_RATE * 2) { if (it % 40 < 20) 1500 else -1500 }
-                        val e1 = engine.extractEmbedding(dummy)
-                        if (e1 != null) {
-                            Log.i(
-                                "OrbVoice",
-                                "NeuralSpeakerEngine UNLOCKED on Hexagon V79 NPU (${modelFile.name}, cached=$useCache, ctxSize=${cacheFile.length() / 1024}KB)"
-                            )
-                            return engine
-                        }
-                        engine.close()
-                    } catch (e: Throwable) {
-                        Log.w("OrbVoice", "QNN HTP V79 init failed (cached=$useCache): ${e.message}")
-                        if (useCache) {
-                            // Corrupted or stale context binary — delete so next attempt recompiles cleanly
-                            cacheFile.delete()
+                                if (useSharedMem) {
+                                    qnnOpts["enable_htp_shared_memory_allocator"] = "1"
+                                }
+                                addQnn(qnnOpts)
+                            }
+                            val loadPath = if (useCache) cacheFile.absolutePath else modelFile.absolutePath
+                            val session = env.createSession(loadPath, opts)
+                            val inName = session.inputNames.first()
+                            val label = if (useSharedMem) "Hexagon V79 NPU (ShMem)" else "Hexagon V79 NPU"
+                            val engine = NeuralSpeakerEngine(env, session, inName, label)
+                            val dummy = ShortArray(SAMPLE_RATE * 2) { if (it % 40 < 20) 1500 else -1500 }
+                            val e1 = engine.extractEmbedding(dummy)
+                            if (e1 != null) {
+                                Log.i(
+                                    "OrbVoice",
+                                    "NeuralSpeakerEngine UNLOCKED on $label (${modelFile.name}, cached=$useCache, ctxSize=${cacheFile.length() / 1024}KB)"
+                                )
+                                return engine
+                            }
+                            engine.close()
+                        } catch (e: Throwable) {
+                            Log.w("OrbVoice", "QNN HTP V79 init failed (cached=$useCache, shmem=$useSharedMem): ${e.message}")
+                            if (useCache && !useSharedMem) {
+                                cacheFile.delete()
+                            }
                         }
                     }
 

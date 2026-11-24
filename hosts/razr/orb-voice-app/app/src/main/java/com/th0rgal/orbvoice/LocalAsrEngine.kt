@@ -6,6 +6,7 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineCohereTranscribeModelConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
@@ -80,6 +81,11 @@ class LocalAsrEngine private constructor(
         return out
     }
 
+    @Synchronized
+    fun resetVad() {
+        try { vad?.reset() } catch (_: Exception) {}
+    }
+
     override fun close() {
         try { vad?.release() } catch (_: Exception) {}
         try { recognizer.release() } catch (_: Exception) {}
@@ -87,6 +93,8 @@ class LocalAsrEngine private constructor(
 
     enum class AsrModel(val id: String, val label: String) {
         COHERE_2B("cohere", "Cohere Transcribe 2B"),
+        QWEN3_1_7B("qwen3-1.7b", "Qwen3-ASR 1.7B"),
+        QWEN3_0_6B("qwen3-0.6b", "Qwen3-ASR 0.6B"),
         PARAKEET_V3("parakeet", "Parakeet-TDT 0.6B v3"),
         WHISPER_TURBO("whisper", "Whisper Large-v3 Turbo");
 
@@ -112,6 +120,9 @@ class LocalAsrEngine private constructor(
         private fun findCohereDir(context: Context): File? =
             findModelDir(context, "cohere-transcribe", listOf("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"))
 
+        private fun findQwen3Dir(context: Context, subdir: String): File? =
+            findModelDir(context, subdir, listOf("conv_frontend.onnx", "encoder.int8.onnx", "decoder.int8.onnx", "tokenizer/vocab.json"))
+
         private fun findParakeetDir(context: Context): File? =
             findModelDir(context, "parakeet-v3", listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"))
 
@@ -121,6 +132,8 @@ class LocalAsrEngine private constructor(
         fun availableModels(context: Context): List<AsrModel> {
             val out = mutableListOf<AsrModel>()
             if (findCohereDir(context) != null) out.add(AsrModel.COHERE_2B)
+            if (findQwen3Dir(context, "qwen3-asr-1.7b") != null) out.add(AsrModel.QWEN3_1_7B)
+            if (findQwen3Dir(context, "qwen3-asr-0.6b") != null) out.add(AsrModel.QWEN3_0_6B)
             if (findParakeetDir(context) != null) out.add(AsrModel.PARAKEET_V3)
             if (findWhisperDir(context) != null) out.add(AsrModel.WHISPER_TURBO)
             return out
@@ -163,6 +176,27 @@ class LocalAsrEngine private constructor(
                             useItn = true
                         ),
                         tokens = File(dir, "tokens.txt").absolutePath,
+                        numThreads = 6,
+                        debug = false,
+                        provider = "cpu"
+                    )
+                }
+                AsrModel.QWEN3_1_7B, AsrModel.QWEN3_0_6B -> {
+                    val subdir = if (model == AsrModel.QWEN3_1_7B) "qwen3-asr-1.7b" else "qwen3-asr-0.6b"
+                    val dir = findQwen3Dir(context, subdir) ?: return null
+                    OfflineModelConfig(
+                        qwen3Asr = OfflineQwen3AsrModelConfig(
+                            convFrontend = File(dir, "conv_frontend.onnx").absolutePath,
+                            encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                            decoder = File(dir, "decoder.int8.onnx").absolutePath,
+                            tokenizer = File(dir, "tokenizer").absolutePath,
+                            maxTotalLen = 512,
+                            maxNewTokens = 128,
+                            temperature = 1e-6f,
+                            topP = 0.8f,
+                            seed = 42,
+                            hotwords = ""
+                        ),
                         numThreads = 6,
                         debug = false,
                         provider = "cpu"
@@ -292,14 +326,13 @@ class LocalAsrEngine private constructor(
 
             val modelsRoot = VoiceNoteStore.modelsDir(context)
 
-            // 2. Cohere-Transcribe-2B sweep: cpu-6t (lang=en), cpu-6t (lang=fr), xnnpack-6t (lang=fr)
-            val cohereDir = File(modelsRoot, "cohere-transcribe")
-            if (File(cohereDir, "encoder.int8.onnx").exists()) {
-                for ((label, prov, threads, lang) in listOf(
-                    arrayOf("COHERE-2B cpu-6t lang=en", "cpu", "6", "en"),
-                    arrayOf("COHERE-2B cpu-6t lang=fr", "cpu", "6", "fr"),
-                    arrayOf("COHERE-2B xnnpack-6t lang=fr", "xnnpack", "6", "fr")
-                )) {
+            // 2. Qwen3-ASR 0.6B & 1.7B INT8 (zero-shot 30+ lang auto-detect + code-switching)
+            for ((label, subdir) in listOf(
+                "QWEN3-ASR-0.6B cpu-6t" to "qwen3-asr-0.6b",
+                "QWEN3-ASR-1.7B cpu-6t" to "qwen3-asr-1.7b"
+            )) {
+                val qDir = File(modelsRoot, subdir)
+                if (File(qDir, "decoder.int8.onnx").exists()) {
                     runCatching {
                         val t0 = System.nanoTime()
                         val rec = OfflineRecognizer(
@@ -307,16 +340,20 @@ class LocalAsrEngine private constructor(
                             config = OfflineRecognizerConfig(
                                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                                 modelConfig = OfflineModelConfig(
-                                    cohereTranscribe = OfflineCohereTranscribeModelConfig(
-                                        encoder = File(cohereDir, "encoder.int8.onnx").absolutePath,
-                                        decoder = File(cohereDir, "decoder.int8.onnx").absolutePath,
-                                        language = lang,
-                                        usePunct = true,
-                                        useItn = true
+                                    qwen3Asr = OfflineQwen3AsrModelConfig(
+                                        convFrontend = File(qDir, "conv_frontend.onnx").absolutePath,
+                                        encoder = File(qDir, "encoder.int8.onnx").absolutePath,
+                                        decoder = File(qDir, "decoder.int8.onnx").absolutePath,
+                                        tokenizer = File(qDir, "tokenizer").absolutePath,
+                                        maxTotalLen = 512,
+                                        maxNewTokens = 128,
+                                        temperature = 1e-6f,
+                                        topP = 0.8f,
+                                        seed = 42,
+                                        hotwords = ""
                                     ),
-                                    tokens = File(cohereDir, "tokens.txt").absolutePath,
-                                    numThreads = threads.toInt(),
-                                    provider = prov
+                                    numThreads = 6,
+                                    provider = "cpu"
                                 )
                             )
                         )
@@ -329,36 +366,35 @@ class LocalAsrEngine private constructor(
                 }
             }
 
-            // 3. Parakeet-TDT-0.6B-v3 sweep: cpu-6t vs xnnpack-6t
-            val pkDir = File(modelsRoot, "parakeet-v3")
-            if (File(pkDir, "encoder.int8.onnx").exists()) {
-                for ((label, prov) in listOf("PARAKEET-V3 cpu-6t" to "cpu", "PARAKEET-V3 xnnpack-6t" to "xnnpack")) {
-                    runCatching {
-                        val t0 = System.nanoTime()
-                        val rec = OfflineRecognizer(
-                            assetManager = null,
-                            config = OfflineRecognizerConfig(
-                                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                                modelConfig = OfflineModelConfig(
-                                    transducer = OfflineTransducerModelConfig(
-                                        encoder = File(pkDir, "encoder.int8.onnx").absolutePath,
-                                        decoder = File(pkDir, "decoder.int8.onnx").absolutePath,
-                                        joiner = File(pkDir, "joiner.int8.onnx").absolutePath
-                                    ),
-                                    tokens = File(pkDir, "tokens.txt").absolutePath,
-                                    numThreads = 6,
-                                    provider = prov,
-                                    modelType = "nemo_transducer"
-                                )
+            // 3. Cohere-Transcribe-2B INT8 (cpu-6t, lang=fr)
+            val cohereDir = File(modelsRoot, "cohere-transcribe")
+            if (File(cohereDir, "encoder.int8.onnx").exists()) {
+                runCatching {
+                    val t0 = System.nanoTime()
+                    val rec = OfflineRecognizer(
+                        assetManager = null,
+                        config = OfflineRecognizerConfig(
+                            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                            modelConfig = OfflineModelConfig(
+                                cohereTranscribe = OfflineCohereTranscribeModelConfig(
+                                    encoder = File(cohereDir, "encoder.int8.onnx").absolutePath,
+                                    decoder = File(cohereDir, "decoder.int8.onnx").absolutePath,
+                                    language = "fr",
+                                    usePunct = true,
+                                    useItn = true
+                                ),
+                                tokens = File(cohereDir, "tokens.txt").absolutePath,
+                                numThreads = 6,
+                                provider = "cpu"
                             )
                         )
-                        val loadMs = (System.nanoTime() - t0) / 1_000_000L
-                        val tf0 = System.nanoTime(); val s1 = rec.createStream(); s1.acceptWaveform(frFloats, 16000); rec.decode(s1); val frTxt = rec.getResult(s1).text.trim(); s1.release(); val frMs = (System.nanoTime() - tf0) / 1_000_000L
-                        val te0 = System.nanoTime(); val s2 = rec.createStream(); s2.acceptWaveform(enFloats, 16000); rec.decode(s2); val enTxt = rec.getResult(s2).text.trim(); s2.release(); val enMs = (System.nanoTime() - te0) / 1_000_000L
-                        Log.i("ScribeBench", "$label: load=${loadMs}ms fr=${frMs}ms en=${enMs}ms | FR='$frTxt' | EN='$enTxt'")
-                        rec.release()
-                    }.onFailure { Log.e("ScribeBench", "$label failed: ${it.message}") }
-                }
+                    )
+                    val loadMs = (System.nanoTime() - t0) / 1_000_000L
+                    val tf0 = System.nanoTime(); val s1 = rec.createStream(); s1.acceptWaveform(frFloats, 16000); rec.decode(s1); val frTxt = rec.getResult(s1).text.trim(); s1.release(); val frMs = (System.nanoTime() - tf0) / 1_000_000L
+                    val te0 = System.nanoTime(); val s2 = rec.createStream(); s2.acceptWaveform(enFloats, 16000); rec.decode(s2); val enTxt = rec.getResult(s2).text.trim(); s2.release(); val enMs = (System.nanoTime() - te0) / 1_000_000L
+                    Log.i("ScribeBench", "COHERE-2B cpu-6t lang=fr: load=${loadMs}ms fr=${frMs}ms en=${enMs}ms | FR='$frTxt' | EN='$enTxt'")
+                    rec.release()
+                }.onFailure { Log.e("ScribeBench", "COHERE-2B failed: ${it.message}") }
             }
 
             Log.i("ScribeBench", "=== SCRIBE BENCHMARK DONE ===")
