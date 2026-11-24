@@ -1,0 +1,105 @@
+--- a/subprojects/magpie/platform-linux/src/gpus/mod.rs
++++ b/subprojects/magpie/platform-linux/src/gpus/mod.rs
+@@ -45,6 +45,78 @@
+     proc_refresh_counter: u8,
+ }
+ 
++
++const KGSL_SYSFS_DIR: &str = "/sys/class/kgsl/kgsl-3d0";
++const KGSL_GPU_ID: &str = "kgsl-3d0";
++
++fn read_kgsl_trimmed(file: &str) -> Option<String> {
++    std::fs::read_to_string(format!("{KGSL_SYSFS_DIR}/{file}"))
++        .ok()
++        .map(|s| s.trim().to_string())
++        .filter(|s| !s.is_empty())
++}
++
++fn kgsl_max_clock_mhz() -> Option<u32> {
++    if let Some(table) = read_kgsl_trimmed("freq_table_mhz") {
++        if let Some(max_mhz) = table
++            .split_whitespace()
++            .filter_map(|v| v.parse::<u32>().ok())
++            .max()
++        {
++            if max_mhz > 0 {
++                return Some(max_mhz);
++            }
++        }
++    }
++    read_kgsl_trimmed("max_gpuclk")
++        .and_then(|s| s.parse::<u64>().ok())
++        .map(|hz| (hz / 1_000_000) as u32)
++        .filter(|&mhz| mhz > 0)
++}
++
++fn discover_kgsl_gpu(vulkan_versions: &HashMap<u32, magpie_platform::gpus::ApiVersion>) -> Option<Gpu> {
++    let raw_model = read_kgsl_trimmed("gpu_model")?;
++    let pretty_name = if let Some(rest) = raw_model.strip_prefix("Adreno") {
++        let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
++        if !num.is_empty() {
++            format!("Qualcomm Adreno {num}")
++        } else {
++            format!("Qualcomm {raw_model}")
++        }
++    } else {
++        raw_model
++    };
++
++    let mut gpu = Gpu {
++        id: KGSL_GPU_ID.to_string(),
++        vendor_id: 0x5143,
++        device_id: 0x0830,
++        device_name: Some(pretty_name),
++        max_clock_speed_mhz: kgsl_max_clock_mhz(),
++        vulkan_version: vulkan_versions.values().next().copied(),
++        ..Default::default()
++    };
++    refresh_kgsl_gpu(&mut gpu);
++    Some(gpu)
++}
++
++fn refresh_kgsl_gpu(gpu: &mut Gpu) {
++    if let Some(busy_str) = read_kgsl_trimmed("gpu_busy_percentage") {
++        if let Ok(pct) = busy_str.trim_end_matches('%').trim().parse::<f32>() {
++            gpu.utilization_percent = Some(pct.clamp(0.0, 100.0));
++        }
++    }
++    if let Some(clk_mhz) = read_kgsl_trimmed("clock_mhz").and_then(|s| s.parse::<u32>().ok()) {
++        gpu.clock_speed_mhz = Some(clk_mhz);
++    }
++    if gpu.max_clock_speed_mhz.is_none() {
++        gpu.max_clock_speed_mhz = kgsl_max_clock_mhz();
++    }
++    if let Some(temp_mc) = read_kgsl_trimmed("temp").and_then(|s| s.parse::<f32>().ok()) {
++        gpu.temperature_c = Some(if temp_mc > 1000.0 { temp_mc / 1000.0 } else { temp_mc });
++    }
++}
++
+ impl magpie_platform::gpus::GpuCache for GpuCache {
+     fn new() -> Self
+     where
+@@ -177,6 +249,12 @@
+             }
+         }
+ 
++        if gpus.is_empty() {
++            if let Some(kgsl_gpu) = discover_kgsl_gpu(&vulkan_versions) {
++                gpus.insert(KGSL_GPU_ID.to_string(), kgsl_gpu);
++            }
++        }
++
+         Self {
+             gpu_list,
+             gpus,
+@@ -185,6 +263,10 @@
+     }
+ 
+     fn refresh(&mut self) {
++        if let Some(kgsl_gpu) = self.gpus.get_mut(KGSL_GPU_ID) {
++            refresh_kgsl_gpu(kgsl_gpu);
++        }
++
+         let mut gpu_list = self.gpu_list.write().unwrap();
+         let gpu_list = gpu_list.deref_mut();
+ 

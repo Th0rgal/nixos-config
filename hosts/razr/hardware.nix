@@ -248,6 +248,14 @@ in
     };
   };
 
+  nixpkgs.overlays = [
+    (_final: prev: {
+      mission-center = prev.mission-center.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./patches/mission-center-kgsl-gpu.patch ];
+      });
+    })
+  ];
+
   environment.systemPackages = [
     sidesystemUpowerd
     sidesystemFprintd
