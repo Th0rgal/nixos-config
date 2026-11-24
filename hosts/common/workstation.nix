@@ -264,7 +264,9 @@ in
         sshUser = "nixbuild";
         sshKey = secretPath "nix_builder_spark_key" "/root/.ssh/nix-builder-spark";
         systems = [ "aarch64-linux" ];
-        maxJobs = 8;
+        # Cap concurrent remote jobs to 4 so parallel NAR uploads don't saturate
+        # high-latency WAN/mesh links and trigger SSH Broken pipe timeouts.
+        maxJobs = 4;
         speedFactor = 8;
         supportedFeatures = [
           "big-parallel"
@@ -277,6 +279,11 @@ in
       builders-use-substitutes = true;
       connect-timeout = 5;
       fallback = true;
+      # Allow wheel users to pass `--option builders ""` (used by `rebuild --local`).
+      trusted-users = [
+        "root"
+        "@wheel"
+      ];
       secret-key-files = [ (secretPath "nix_signing_key" "/etc/nix/signing-key.sec") ];
     };
     programs.ssh = {
@@ -284,8 +291,9 @@ in
       extraConfig = ''
         Host ${inventory.builder.hostName}
           ConnectTimeout 5
-          ServerAliveInterval 15
-          ServerAliveCountMax 3
+          Compression yes
+          ServerAliveInterval 30
+          ServerAliveCountMax 10
           TCPKeepAlive yes
       '';
     };

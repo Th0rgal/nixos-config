@@ -14,6 +14,7 @@ let
   #
   #   rebuild                 # nh os switch, using ../omarchnix if it is checked out and the latest Orb master
   #   rebuild boot|test|build|build-vm|dry
+  #   rebuild --local         # skip remote builders and build locally (`--option builders ""`)
   #   rebuild --locked        # ignore the local checkout and Orb master, build exactly flake.lock
   #   rebuild --bump-orb      # also write Th0rgal/orb master into omarchnix's flake.lock
   #   rebuild -- <args>       # extra arguments forwarded to nix
@@ -34,6 +35,7 @@ let
       omarchnix="''${REBUILD_OMARCHNIX:-${workDir}/omarchnix}"
       folio="''${REBUILD_FOLIO:-/home/${user.username}/work/folio}"
       verb=switch
+      local_only=0
       locked=0
       bump_orb=0
       host=""
@@ -41,7 +43,7 @@ let
 
       usage() {
         sed -n 's/^  #   //p' "$0" 2>/dev/null || true
-        echo "usage: rebuild [switch|boot|test|build|build-vm|dry] [--host NAME] [--locked] [--bump-orb] [-- nix-args...]"
+        echo "usage: rebuild [switch|boot|test|build|build-vm|dry] [--host NAME] [--local] [--locked] [--bump-orb] [-- nix-args...]"
       }
 
       while [ $# -gt 0 ]; do
@@ -49,6 +51,7 @@ let
           switch|boot|test|build|build-vm) verb="$1" ;;
           dry) verb=dry ;;
           --host) host="$2"; shift ;;
+          --local) local_only=1 ;;
           --locked) locked=1 ;;
           --bump-orb) bump_orb=1 ;;
           -h|--help) usage; exit 0 ;;
@@ -57,6 +60,11 @@ let
         esac
         shift
       done
+
+      if [ "$local_only" = 1 ]; then
+        echo "rebuild: building locally (remote builders disabled)" >&2
+        extra+=(--option builders "")
+      fi
 
       overrides=()
       if [ "$locked" = 0 ] && [ -f "$omarchnix/flake.nix" ]; then
