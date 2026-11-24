@@ -271,6 +271,9 @@ class DesktopActivity : ComponentActivity() {
             "1.0" -> "1.25"
             "1.25" -> "1.5"
             "1.5" -> "2.0"
+            "2.0" -> "2.5"
+            "2.5" -> "3.0"
+            "3.0" -> "4.0"
             else -> "1.0"
         }
         phoneScale = next
