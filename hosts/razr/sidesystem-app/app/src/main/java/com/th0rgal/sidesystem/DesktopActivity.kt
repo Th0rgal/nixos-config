@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -609,8 +610,9 @@ class DesktopActivity : ComponentActivity() {
                             )
                         ) {
                             Column(
+                                modifier = Modifier.verticalScroll(rememberScrollState()),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 OverlayRailButton(
                                     if (isLeftCutout) Icons.Rounded.ChevronLeft else Icons.Rounded.ChevronRight,
@@ -636,6 +638,9 @@ class DesktopActivity : ComponentActivity() {
                                     },
                                     resPriority == "phone"
                                 ) { cycleResPriority() }
+                                OverlayRailButton(Icons.Rounded.ZoomIn, "${phoneScale}x", phoneScale != "1.0") {
+                                    cyclePhoneScale()
+                                }
                                 OverlayRailButton(Icons.Rounded.Refresh, "Fit", false) {
                                     syncResolutionToCurrentScreen()
                                     rfb?.requestFullRefresh()
@@ -700,18 +705,18 @@ class DesktopActivity : ComponentActivity() {
         val fg = tintOverride ?: if (active) OrbBlue else OrbFgStrong
         Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(bg)
                 .clickable(onClick = onClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 7.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
                 tint = fg,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
             Text(
                 text = label,
