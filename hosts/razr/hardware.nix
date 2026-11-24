@@ -230,6 +230,10 @@ in
   # Android's tmpfs does not support `security.capability` xattrs, which causes
   # `suid-sgid-wrappers.service` to abort before creating `unix_chkpwd`/`sudo`.
   security.wrappers = {
+    gnome-keyring-daemon = {
+      capabilities = lib.mkForce "";
+      setuid = lib.mkForce false;
+    };
     nethogs = {
       capabilities = lib.mkForce "";
       setuid = lib.mkForce true;
