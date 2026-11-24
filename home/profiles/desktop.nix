@@ -171,7 +171,7 @@ in
       enable = lib.mkDefault true;
       wallpapers = {
         enable = true;
-        inherit (wallpapers) default workspaces;
+        inherit (wallpapers) default workspaces variants;
       };
     };
   };

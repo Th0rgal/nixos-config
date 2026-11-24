@@ -248,11 +248,11 @@
         "turbo-lean": "turbo-lean"
       },
       "locked": {
-        "lastModified": 1795461617,
-        "narHash": "sha256-dEFbSlkQ5lmOnkDHDEthObDIzhPxapL+QVQn6CQYQnU=",
+        "lastModified": 1795506395,
+        "narHash": "sha256-+jkIr/h286dgV7JG9/UDdwWejPElG4uNfOwVbTUtbJY=",
         "owner": "Th0rgal",
         "repo": "omarchnix",
-        "rev": "93fe819ae875812d51ef7d307a017a30935e97a7",
+        "rev": "1447a8897b7220e676b1f53519a4ae4c1c83d1c7",
         "type": "github"
       },
       "original": {
@@ -388,11 +388,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795385575,
-        "narHash": "sha256-MW6bjMbIwdIu8UcXdvVL3cLU2sWgbzmneQ4V7qYjSMU=",
+        "lastModified": 1795478627,
+        "narHash": "sha256-3hPl3rK5CsgVdkQTCce9Lekf0F9I2NaP/PWri3H9f1g=",
         "owner": "Th0rgal",
         "repo": "orb",
-        "rev": "30d3d7df39fbaf0ee49b1d8171f7c9369ee5859f",
+        "rev": "62e091a83f2a06925b1a2a89f96f85171f2b0e2f",
         "type": "github"
       },
       "original": {
@@ -495,11 +495,11 @@
     "wallpapers": {
       "flake": false,
       "locked": {
-        "lastModified": 1794381535,
-        "narHash": "sha256-x0d6b8Vj+8tmDleUSmS/wRGP4kMdTOC9pADvgjW4990=",
+        "lastModified": 1795506081,
+        "narHash": "sha256-8TVLN+9PBa3maNE6GvXVcQqj9R8XSTt5UNmDMLFO8AI=",
         "owner": "Th0rgal",
         "repo": "wallpapers",
-        "rev": "c82f156286ee93adef1224ff6a596524971d25f3",
+        "rev": "dd410e1a147d08d0a9a36cf45462e66c9b3d39e6",
         "type": "github"
       },
       "original": {
