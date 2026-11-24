@@ -256,12 +256,12 @@ class DesktopActivity : ComponentActivity() {
         } else {
             1.0
         }
-        val targetW = ((physW / downscale).roundToInt() / 2) * 2
-        val targetH = ((physH / downscale).roundToInt() / 2) * 2
+        val targetW = ((physW / downscale).roundToInt() / 8) * 8
+        val targetH = ((physH / downscale).roundToInt() / 8) * 8
         val minDim = minOf(targetW, targetH)
+        // Hyprland requires exact integer-friendly fractional scales (1.0 / 1.25 / 1.5).
         val hyprScale = when {
-            minDim <= 720 -> "1.0"
-            minDim <= 1000 -> "1.15"
+            minDim <= 960 -> "1.0"
             else -> "1.25"
         }
 
@@ -759,13 +759,6 @@ private class DesktopSurfaceView(
             computeFitRect(vw, vh)
             srcRect.set(0, 0, fbW, fbH)
             canvas.drawBitmap(bmp, srcRect, dstRect, bitmapPaint)
-
-            if (isHandMouse()) {
-                val sx = dstRect.left + (cursorX / fbW.toFloat()) * dstRect.width()
-                val sy = dstRect.top + (cursorY / fbH.toFloat()) * dstRect.height()
-                canvas.drawCircle(sx, sy, 9f, cursorFill)
-                canvas.drawCircle(sx, sy, 9f, cursorRing)
-            }
         } finally {
             try { holder.unlockCanvasAndPost(canvas) } catch (_: Exception) {}
         }

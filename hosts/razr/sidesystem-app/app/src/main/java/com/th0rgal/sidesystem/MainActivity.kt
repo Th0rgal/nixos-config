@@ -172,6 +172,14 @@ class MainActivity : ComponentActivity() {
                             scope.launch { refreshAll(showSpinner = true) }
                         },
                         onOpenDesktop = {
+                            if (status.desktopRunning) {
+                                val desktopIntent = Intent(context, DesktopActivity::class.java).apply {
+                                    putExtra(DesktopActivity.EXTRA_PORT, status.vncPort)
+                                    putExtra(DesktopActivity.EXTRA_THEME_MODE, ThemeMode.SYSTEM.key)
+                                }
+                                context.startActivity(desktopIntent)
+                                return@DashboardCallbacks
+                            }
                             if (busyAction != null) return@DashboardCallbacks
                             scope.launch {
                                 busyAction = "open_desktop"
