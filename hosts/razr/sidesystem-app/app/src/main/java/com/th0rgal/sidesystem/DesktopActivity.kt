@@ -907,15 +907,12 @@ private class DesktopSurfaceView(
                     val rawDy = ev.y - lastY
                     lastX = ev.x; lastY = ev.y
                     if (hypot((ev.x - downX).toDouble(), (ev.y - downY).toDouble()) > 10.0) moved = true
-                    // Convert physical screen delta to framebuffer space with smooth natural gain (1.0x..1.65x)
+                    // Pure 1:1 physical-to-framebuffer mapping (zero artificial acceleration):
+                    // moving your finger 1 cm moves the cursor exactly 1 cm on screen.
                     val sx = if (dstRect.width() > 1f) fbW.toFloat() / dstRect.width() else 1f
                     val sy = if (dstRect.height() > 1f) fbH.toFloat() / dstRect.height() else 1f
-                    val fdx = rawDx * sx
-                    val fdy = rawDy * sy
-                    val speed = hypot(fdx.toDouble(), fdy.toDouble()).toFloat()
-                    val gain = 1.0f + ((speed - 4f).coerceAtLeast(0f) / 36f).coerceAtMost(0.65f)
-                    cursorX = (cursorX + fdx * gain).coerceIn(0f, fbW - 1f)
-                    cursorY = (cursorY + fdy * gain).coerceIn(0f, fbH - 1f)
+                    cursorX = (cursorX + rawDx * sx).coerceIn(0f, fbW - 1f)
+                    cursorY = (cursorY + rawDy * sy).coerceIn(0f, fbH - 1f)
                     onPointer(cursorX.roundToInt(), cursorY.roundToInt(), if (draggingButton) 1 else 0)
                 } else {
                     cursorX = viewToFbX(ev.x)
