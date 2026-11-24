@@ -1194,9 +1194,12 @@ private fun LiveTranscriptStream(
         )
     }
 
-    LaunchedEffect(groups.size, recState.liveSegments.size, recState.partialText) {
+    val lastChars = (groups.lastOrNull()?.paragraphs?.sumOf { it.length } ?: 0) + recState.partialText.length
+    LaunchedEffect(groups.size, recState.liveSegments.size, lastChars) {
         if (groups.isNotEmpty()) {
-            listState.animateScrollToItem(groups.lastIndex)
+            // Scroll to the trailing bottom_anchor item so even a tall multi-sentence speaker card
+            // stays pinned to its latest line at the bottom of the screen.
+            listState.scrollToItem(groups.size)
         }
     }
 
@@ -1237,6 +1240,9 @@ private fun LiveTranscriptStream(
                 useSerif = false,
                 onClickSpeaker = { onRenameSpeaker(grp.speakerIndex, grp.speakerName) }
             )
+        }
+        item(key = "bottom_anchor") {
+            Spacer(modifier = Modifier.height(1.dp))
         }
     }
 }
