@@ -51,6 +51,7 @@ static int g_abs_dirty = 0;
 static int g_vnc_fd = -1;
 static int g_fb_w = 1920;
 static int g_fb_h = 1080;
+static int g_bpp = 4;
 static double g_px = 960.0;
 static double g_py = 540.0;
 static uint8_t g_btn_mask = 0;
@@ -88,6 +89,87 @@ static void vnc_close(void) {
     if (g_vnc_fd >= 0) {
         close(g_vnc_fd);
         g_vnc_fd = -1;
+    }
+}
+
+static void vnc_request_resize_watch(void) {
+    if (g_vnc_fd < 0) return;
+    /* FramebufferUpdateRequest (type 3): incremental=1, 1x1 rect so wayvnc pushes
+     * DesktopSize (-223) pseudo-encoding immediately whenever HEADLESS-1 resizes or rotates. */
+    uint8_t req[10];
+    req[0] = 3;
+    req[1] = 1; /* incremental */
+    req[2] = 0; req[3] = 0; /* x = 0 */
+    req[4] = 0; req[5] = 0; /* y = 0 */
+    req[6] = 0; req[7] = 1; /* w = 1 */
+    req[8] = 0; req[9] = 1; /* h = 1 */
+    if (write_exact(g_vnc_fd, req, sizeof(req)) < 0) vnc_close();
+}
+
+static void vnc_handle_server_msg(void) {
+    uint8_t mtype = 0;
+    if (read_exact(g_vnc_fd, &mtype, 1) < 0) { vnc_close(); return; }
+    if (mtype == 0) {
+        /* FramebufferUpdate: 1B pad, 2B nrects */
+        uint8_t hdr[3];
+        if (read_exact(g_vnc_fd, hdr, 3) < 0) { vnc_close(); return; }
+        uint16_t nrects = (uint16_t)((hdr[1] << 8) | hdr[2]);
+        for (uint16_t i = 0; i < nrects; i++) {
+            uint8_t rhdr[12];
+            if (read_exact(g_vnc_fd, rhdr, 12) < 0) { vnc_close(); return; }
+            uint16_t rw = (uint16_t)((rhdr[4] << 8) | rhdr[5]);
+            uint16_t rh = (uint16_t)((rhdr[6] << 8) | rhdr[7]);
+            int32_t enc = (int32_t)(((uint32_t)rhdr[8] << 24) | ((uint32_t)rhdr[9] << 16) |
+                                    ((uint32_t)rhdr[10] << 8) | (uint32_t)rhdr[11]);
+            if (enc == -223) {
+                /* DesktopSize pseudo-encoding: track live rotation/resize! */
+                if (rw > 0 && rh > 0 && (rw != g_fb_w || rh != g_fb_h)) {
+                    g_fb_w = rw;
+                    g_fb_h = rh;
+                    if (g_px >= g_fb_w) g_px = g_fb_w - 1;
+                    if (g_py >= g_fb_h) g_py = g_fb_h - 1;
+                    fprintf(stderr, "[bt-hid-bridge] Framebuffer resized -> %dx%d\n", g_fb_w, g_fb_h);
+                }
+            } else if (enc == 0) {
+                /* Raw pixels: skip rw * rh * g_bpp bytes */
+                size_t rem = (size_t)rw * (size_t)rh * (size_t)g_bpp;
+                uint8_t skip[1024];
+                while (rem > 0) {
+                    size_t chunk = rem > sizeof(skip) ? sizeof(skip) : rem;
+                    if (read_exact(g_vnc_fd, skip, chunk) < 0) { vnc_close(); return; }
+                    rem -= chunk;
+                }
+            }
+        }
+        vnc_request_resize_watch();
+    } else if (mtype == 1) {
+        /* SetColourMapEntries: 1B pad, 2B first, 2B ncolors, then 6B/color */
+        uint8_t hdr[5];
+        if (read_exact(g_vnc_fd, hdr, 5) < 0) { vnc_close(); return; }
+        size_t rem = (size_t)((hdr[3] << 8) | hdr[4]) * 6;
+        uint8_t skip[256];
+        while (rem > 0) {
+            size_t chunk = rem > sizeof(skip) ? sizeof(skip) : rem;
+            if (read_exact(g_vnc_fd, skip, chunk) < 0) { vnc_close(); return; }
+            rem -= chunk;
+        }
+    } else if (mtype == 2) {
+        /* Bell: no payload */
+    } else if (mtype == 3) {
+        /* ServerCutText: 3B pad, 4B len, text */
+        uint8_t hdr[7];
+        if (read_exact(g_vnc_fd, hdr, 7) < 0) { vnc_close(); return; }
+        size_t rem = ((size_t)hdr[3] << 24) | ((size_t)hdr[4] << 16) |
+                     ((size_t)hdr[5] << 8)  | (size_t)hdr[6];
+        uint8_t skip[512];
+        while (rem > 0) {
+            size_t chunk = rem > sizeof(skip) ? sizeof(skip) : rem;
+            if (read_exact(g_vnc_fd, skip, chunk) < 0) { vnc_close(); return; }
+            rem -= chunk;
+        }
+    } else {
+        /* Unknown server message; reconnect cleanly */
+        vnc_close();
     }
 }
 
@@ -146,6 +228,8 @@ static int vnc_connect(int port) {
     if (read_exact(fd, sinit, 24) < 0) { close(fd); return -1; }
     g_fb_w = (sinit[0] << 8) | sinit[1];
     g_fb_h = (sinit[2] << 8) | sinit[3];
+    g_bpp = sinit[4] / 8;
+    if (g_bpp <= 0 || g_bpp > 4) g_bpp = 4;
     if (g_fb_w <= 0) g_fb_w = 1920;
     if (g_fb_h <= 0) g_fb_h = 1080;
     uint32_t name_len = ((uint32_t)sinit[20] << 24) | ((uint32_t)sinit[21] << 16) |
@@ -161,6 +245,16 @@ static int vnc_connect(int port) {
     g_px = g_fb_w / 2.0;
     g_py = g_fb_h / 2.0;
     g_vnc_fd = fd;
+
+    /* Advertise Raw (0) + DesktopSize (-223) so wayvnc notifies us on live rotation/resize */
+    uint8_t encs[12] = {
+        2, 0, 0, 2,             /* SetEncodings, pad, count=2 */
+        0x00, 0x00, 0x00, 0x00, /* Raw = 0 */
+        0xFF, 0xFF, 0xFF, 0x21  /* DesktopSize = -223 */
+    };
+    if (write_exact(g_vnc_fd, encs, sizeof(encs)) < 0) { vnc_close(); return -1; }
+    vnc_request_resize_watch();
+
     fprintf(stderr, "[bt-hid-bridge] Connected to wayvnc 127.0.0.1:%d (%dx%d)\n", port, g_fb_w, g_fb_h);
     return 0;
 }
@@ -447,10 +541,10 @@ int main(int argc, char **argv) {
         int rc = poll(pfds, (nfds_t)nfds, 500);
         if (rc <= 0) continue;
 
-        if (vnc_poll_idx >= 0 && (pfds[vnc_poll_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
-            uint8_t drain[512];
-            ssize_t r = read(g_vnc_fd, drain, sizeof(drain));
-            if (r <= 0) vnc_close();
+        if (vnc_poll_idx >= 0 && (pfds[vnc_poll_idx].revents & (POLLHUP | POLLERR))) {
+            vnc_close();
+        } else if (vnc_poll_idx >= 0 && (pfds[vnc_poll_idx].revents & POLLIN)) {
+            vnc_handle_server_msg();
         }
 
         for (int i = g_dev_count - 1; i >= 0; i--) {
