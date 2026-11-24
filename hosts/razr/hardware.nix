@@ -214,6 +214,7 @@ in
     # Non-loginable password hash (`*`) satisfies PAM account checks for SSH pubkey
     # logins without setting a plaintext password (`!` causes pam_unix to reject).
     hashedPassword = "*";
+    linger = true;
     extraGroups = [
       "wheel"
       "video"
@@ -247,6 +248,18 @@ in
       setuid = lib.mkForce true;
     };
   };
+
+  # Android containers block CAP_SYS_NICE (rtkit-daemon fails with start-limit-hit)
+  # and mount nosuid tmpfs (unix_chkpwd fails in pam_unix for systemd-user).
+  # Use pam_permit for internal PID-1-spawned user@1000.service and enable linger
+  # so `systemctl --user`, `uwsm-app`, and `xdg-desktop-portal` work with full parity.
+  systemd.services.rtkit-daemon.enable = lib.mkForce false;
+  security.pam.services.systemd-user.text = lib.mkForce ''
+    account required pam_permit.so
+    session required pam_limits.so
+    session required pam_env.so
+    session required pam_systemd.so
+  '';
 
   nixpkgs.overlays = [
     (_final: prev: {
