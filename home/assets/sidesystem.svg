@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="128" height="128">
+  <defs>
+    <radialGradient id="orb-bg" cx="50%" cy="39%" r="67%">
+      <stop offset="0%" stop-color="#202022"/>
+      <stop offset="72%" stop-color="#141414"/>
+      <stop offset="100%" stop-color="#0E0E0F"/>
+    </radialGradient>
+  </defs>
+  <!-- Squircle macOS/Omarchy App Plate -->
+  <rect x="4" y="4" width="100" height="100" rx="24" fill="url(#orb-bg)" stroke="#2C2C30" stroke-width="1.5"/>
+  <!-- Outer Obsidian Frame (exact match to Android SideSystem adaptive icon) -->
+  <path d="M31,26 L77,26 C82.5,26 87,30.5 87,36 L87,72 C87,77.5 82.5,82 77,82 L31,82 C25.5,82 21,77.5 21,72 L21,36 C21,30.5 25.5,26 31,26 Z"
+        fill="#1A1A1C" stroke="#38383C" stroke-width="1.8"/>
+  <!-- Left Host Rail -->
+  <rect x="27" y="33" width="12" height="42" rx="3" fill="#2A2A2E"/>
+  <!-- Right Elevated SideSystem Pane (crisp Orb white monolith) -->
+  <rect x="43" y="33" width="38" height="42" rx="5" fill="#F4F4F5"/>
+  <!-- Minimal Terminal Prompt Chevron '>' carved in obsidian -->
+  <path d="M52.5,48.5 L60,54 L52.5,59.5" fill="none" stroke="#141414" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Prompt Cursor Bar '_' -->
+  <line x1="63.5" y1="59.5" x2="71.5" y2="59.5" stroke="#141414" stroke-width="3.4" stroke-linecap="round"/>
+  <!-- Live Orb Green Status Dot -->
+  <circle cx="72" cy="41.5" r="3.2" fill="#199E70"/>
+</svg>

@@ -251,9 +251,11 @@ in
     ] (_: [ "imv.desktop" ]);
   };
 
-  # Present Vesktop as "Discord" with the official Discord icon in Spotlight & Dock.
+  # Present Vesktop as "Discord" with the official Discord icon in Spotlight & Dock,
+  # and share the unified SideSystem Orb monolith icon with the Android companion app.
   xdg.dataFile = {
     "icons/hicolor/scalable/apps/discord.svg".source = ../assets/discord.svg;
+    "icons/hicolor/scalable/apps/sidesystem.svg".source = ../assets/sidesystem.svg;
     "applications/vesktop.desktop".text = ''
       [Desktop Entry]
       Version=1.5

@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 }
                 var isRefreshing by remember { mutableStateOf(false) }
                 var busyAction by remember { mutableStateOf<String?>(null) }
+                var audioBridgeRunning by remember { mutableStateOf(SideSystemAudioService.isRunning) }
 
                 var showLogsSheet by remember { mutableStateOf(false) }
                 var logsContent by remember { mutableStateOf("") }
@@ -84,6 +85,14 @@ class MainActivity : ComponentActivity() {
                         snackbarHostState.currentSnackbarData?.dismiss()
                         snackbarHostState.showSnackbar(message)
                     }
+                }
+
+                val audioPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) { _ ->
+                    SideSystemAudioService.start(context)
+                    audioBridgeRunning = true
+                    showNotice("Audio & Mic Bridge started")
                 }
 
                 suspend fun refreshAll(showSpinner: Boolean) {
@@ -259,6 +268,29 @@ class MainActivity : ComponentActivity() {
                                 SideSystemCtl.setProfile(profile)
                             }
                         },
+                        onSelectChargeCap = { cap ->
+                            runAction("charge_cap", "Battery charge cap set to ${cap.label}") {
+                                SideSystemCtl.setChargeCap(cap)
+                            }
+                        },
+                        onToggleSunshine = { enabled ->
+                            runAction(
+                                "sunshine",
+                                if (enabled) "Sunshine enabled (restart desktop to start)" else "Sunshine stopped"
+                            ) {
+                                SideSystemCtl.setSunshine(enabled)
+                            }
+                        },
+                        onToggleAudioBridge = { enabled ->
+                            if (enabled) {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                SideSystemAudioService.stop(context)
+                                audioBridgeRunning = false
+                                showNotice("Audio & Mic Bridge stopped")
+                            }
+                        },
+                        audioBridgeRunning = audioBridgeRunning,
                         onSelectGpuMode = { mode ->
                             runAction("gpu", "Graphics mode set to ${mode.label}") {
                                 SideSystemCtl.setGpuMode(mode)

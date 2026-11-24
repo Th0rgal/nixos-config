@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Alabaster Frame (matching SideSystem geometry) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M37,32 L71,32 C76,32 80,36 80,41 L80,67 C80,72 76,76 71,76 L37,76 C32,76 28,72 28,67 L28,41 C28,36 32,32 37,32 Z"
+        android:strokeWidth="1.6"
+        android:strokeColor="#FFDCE0E6" />
+
+    <!-- Elevated Dark Monolith Pane -->
+    <path
+        android:fillColor="#FF111318"
+        android:pathData="M37,38 L71,38 C73.2,38 75,39.8 75,42 L75,66 C75,68.2 73.2,70 71,70 L37,70 C34.8,70 33,68.2 33,66 L33,42 C33,39.8 34.8,38 37,38 Z" />
+
+    <!-- 5 Minimal Multi-Voice Waveform Bars -->
+    <path android:fillColor="#00000000" android:pathData="M42,50 L42,58" android:strokeWidth="2.8" android:strokeColor="#FFF4F4F5" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M48,45 L48,63" android:strokeWidth="2.8" android:strokeColor="#FFF4F4F5" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M54,48 L54,60" android:strokeWidth="2.8" android:strokeColor="#FF86AEE4" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M60,44 L60,64" android:strokeWidth="2.8" android:strokeColor="#FFF4F4F5" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M66,51 L66,57" android:strokeWidth="2.8" android:strokeColor="#FFF4F4F5" android:strokeLineCap="round" />
+
+    <!-- Live Orb Green NPU Dot -->
+    <path
+        android:fillColor="#FF10855B"
+        android:pathData="M68,44 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0" />
+</vector>

@@ -3,11 +3,13 @@
 # `hosts/common/workstation.nix`; this file holds only Apple Silicon / laptop specifics.
 {
   lib,
+  pkgs,
   inventory,
   ...
 }:
 let
   inherit (inventory) user;
+  smartconnectLinux = pkgs.callPackage ../../pkgs/smartconnect-linux.nix { };
 in
 {
   imports = [
@@ -15,6 +17,7 @@ in
     ./hardware.nix
     ./bench.nix
     ./gnosisvpn.nix
+    ./usb-tether.nix
   ];
 
   networking.hostName = "m2air";
@@ -61,8 +64,24 @@ in
     };
   };
 
+  # Motorola Smart Connect (native peer for Razr 60 Ultra: clipboard, notifications,
+  # screen/app mirroring, Cross Control, file transfer) replaces KDE Connect Android
+  # mirroring while keeping KDE Connect enabled for iOS support.
+  environment.systemPackages = [ smartconnectLinux ];
+
+  systemd.user.services.smartconnectd = {
+    description = "Motorola Smart Connect Linux daemon (smartconnectd)";
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    serviceConfig = {
+      ExecStart = "${smartconnectLinux}/bin/smartconnectd";
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
+  };
+
   home-manager.users.${user.username} = {
-    programs.omarchnix.sharing.kdeconnect.androidMirroring.enable = true;
+    programs.omarchnix.sharing.kdeconnect.androidMirroring.enable = false;
   };
 
   # YubiKey PIV SSH agent for the Paloma fleet admin key (`thomas-yubikey-admin`).

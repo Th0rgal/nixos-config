@@ -95,6 +95,20 @@ enum class GpuMode(val cliValue: String, val label: String, val subtitle: String
     }
 }
 
+enum class ChargeCap(val cliValue: String, val label: String, val pct: Int) {
+    OFF("off", "Off", 0),
+    CAP_80("80", "80%", 80),
+    CAP_90("90", "90%", 90);
+
+    companion object {
+        fun fromInt(v: Int): ChargeCap = when {
+            v in 60..84 -> CAP_80
+            v in 85..99 -> CAP_90
+            else -> OFF
+        }
+    }
+}
+
 data class TelemetrySample(
     val cpuPct: Int,
     val gpuPct: Int,
@@ -119,6 +133,9 @@ data class SideSystemStatus(
     val battTempC: Int = 0,
     val powerMw: Int = 0,
     val npuReady: Boolean = false,
+    val lidClosed: Boolean = false,
+    val chargeCap: ChargeCap = ChargeCap.OFF,
+    val sunshineEnabled: Boolean = true,
     val powerProfile: PowerProfile = PowerProfile.BALANCED,
     val gpuMode: GpuMode = GpuMode.LLVMPIPE,
     val networkType: String = "Offline",
@@ -264,6 +281,12 @@ object SideSystemCtl {
     suspend fun setProfile(profile: PowerProfile): CommandResult =
         runCtl("profile", profile.cliValue)
 
+    suspend fun setChargeCap(cap: ChargeCap): CommandResult =
+        runCtl("charge-cap", cap.cliValue)
+
+    suspend fun setSunshine(enabled: Boolean): CommandResult =
+        runCtl("sunshine", if (enabled) "on" else "off")
+
     suspend fun setGpuMode(mode: GpuMode): CommandResult =
         runCtl("gpu", mode.cliValue)
 
@@ -387,6 +410,9 @@ object SideSystemCtl {
                 battTempC = obj.optInt("batt_temp_c", 0),
                 powerMw = obj.optInt("power_mw", 0),
                 npuReady = obj.optBoolean("npu_ready", false),
+                lidClosed = obj.optBoolean("lid_closed", false),
+                chargeCap = ChargeCap.fromInt(obj.optInt("charge_cap", 0)),
+                sunshineEnabled = obj.optBoolean("sunshine_enabled", true),
                 powerProfile = profile,
                 gpuMode = gpuMode,
                 networkType = netType,

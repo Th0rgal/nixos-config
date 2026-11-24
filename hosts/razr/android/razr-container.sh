@@ -189,6 +189,20 @@ ds_start() {
     if [[ -e /dev/kgsl-3d0 ]]; then
         bind_args+=("--bind=/dev/kgsl-3d0:/dev/kgsl-3d0")
     fi
+    if [[ -d /vendor/dsp ]]; then
+        mkdir -p "${RAZR_MNT}/run/host-vendor-dsp"
+        bind_args+=("--bind=/vendor/dsp:/run/host-vendor-dsp")
+    fi
+    if [[ -d /vendor/lib64 ]]; then
+        mkdir -p "${RAZR_MNT}/run/host-vendor-lib64"
+        bind_args+=("--bind=/vendor/lib64:/run/host-vendor-lib64")
+    fi
+    if [[ -c /dev/fastrpc-cdsp ]]; then
+        bind_args+=("--bind=/dev/fastrpc-cdsp:/dev/fastrpc-cdsp")
+    fi
+    if [[ -c /dev/fastrpc-cdsp-secure ]]; then
+        bind_args+=("--bind=/dev/fastrpc-cdsp-secure:/dev/fastrpc-cdsp-secure")
+    fi
 
     log "Booting '${RAZR_NAME}' via droidspaces (${DROIDSPACES_BIN}) with --net=host --gpu"
     "${DROIDSPACES_BIN}" start \

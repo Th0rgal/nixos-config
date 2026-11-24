@@ -20,14 +20,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
-#define BIO_REQ_PATH  "/var/lib/sidesystem/bio-req"
-#define BIO_RESP_PATH "/var/lib/sidesystem/bio-resp"
-#define CRED_DB_PATH  "/var/lib/sidesystem/fido2-creds.db"
+#define BRIDGE_SOCK_PATH "/var/lib/sidesystem/bridge.sock"
+#define BIO_REQ_PATH     "/var/lib/sidesystem/bio-req"
+#define BIO_RESP_PATH    "/var/lib/sidesystem/bio-resp"
+#define CRED_DB_PATH     "/var/lib/sidesystem/fido2-creds.db"
 
 /* CTAPHID constants */
 #define CTAPHID_BROADCAST_CID 0xffffffffu
@@ -438,6 +441,39 @@ static void ctaphid_send_keepalive(uint32_t cid, uint8_t status) {
 
 /* ---------------- Android StrongBox Biometric RPC with CTAPHID Keepalive ---------------- */
 static bool call_android_fido2(uint32_t cid, const char *req_line, char *resp_out, size_t resp_sz) {
+    /* Fast path: event-driven Unix socket to sidesystem-bridged (<10ms latency) */
+    int sfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sfd >= 0) {
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", BRIDGE_SOCK_PATH);
+        if (connect(sfd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+            char msg[2048];
+            int mlen = snprintf(msg, sizeof(msg), "BIO_REQ %s\n", req_line);
+            if (mlen > 0 && send(sfd, msg, (size_t)mlen, MSG_NOSIGNAL) == mlen) {
+                for (int i = 0; i < 300 && g_running; i++) {
+                    ctaphid_send_keepalive(cid, 2);
+                    struct pollfd pfd = { .fd = sfd, .events = POLLIN, .revents = 0 };
+                    int rc = poll(&pfd, 1, 100);
+                    if (rc > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+                        ssize_t r = recv(sfd, resp_out, resp_sz - 1, 0);
+                        close(sfd);
+                        if (r > 0) {
+                            resp_out[r] = '\0';
+                            while (r > 0 && (resp_out[r - 1] == '\n' || resp_out[r - 1] == '\r'))
+                                resp_out[--r] = '\0';
+                            return resp_out[0] != '\0';
+                        }
+                        return false;
+                    }
+                }
+            }
+        }
+        close(sfd);
+    }
+
+    /* Fallback path: legacy file-based bio-req / bio-resp */
     FILE *tf = fopen(BIO_RESP_PATH, "w");
     if (tf) fclose(tf);
 

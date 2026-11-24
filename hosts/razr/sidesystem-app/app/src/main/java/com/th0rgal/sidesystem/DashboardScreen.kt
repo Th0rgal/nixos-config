@@ -121,6 +121,10 @@ data class DashboardCallbacks(
     val onApplyDisplay: (String, DisplayScale) -> Unit,
     val onToggleBtHidGrab: (Boolean) -> Unit,
     val onSelectProfile: (PowerProfile) -> Unit,
+    val onSelectChargeCap: (ChargeCap) -> Unit,
+    val onToggleSunshine: (Boolean) -> Unit,
+    val onToggleAudioBridge: (Boolean) -> Unit,
+    val audioBridgeRunning: Boolean,
     val onSelectGpuMode: (GpuMode) -> Unit,
     val onCopySsh: (String) -> Unit,
     val onToggleSshd: (Boolean) -> Unit,
@@ -1235,7 +1239,7 @@ private fun SettingsPanelContent(
 
         HorizontalDivider(color = OrbBorder)
 
-        // 2. Performance
+        // 2. Performance & Battery Charge Cap
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionLabel("PERFORMANCE")
             OrbSegmentedRow(
@@ -1244,6 +1248,16 @@ private fun SettingsPanelContent(
                 labelOf = { it.label },
                 enabled = busyAction == null,
                 onSelect = callbacks.onSelectProfile
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+            SectionLabel("BATTERY CHARGE CAP (DOCKED BYPASS)")
+            OrbSegmentedRow(
+                items = ChargeCap.entries,
+                selected = status.chargeCap,
+                labelOf = { it.label },
+                enabled = busyAction == null,
+                onSelect = callbacks.onSelectChargeCap
             )
         }
 
@@ -1283,6 +1297,30 @@ private fun SettingsPanelContent(
                 onCheckedChange = { enabled ->
                     callbacks.onSelectGpuMode(if (enabled) GpuMode.TURNIP else GpuMode.LLVMPIPE)
                 }
+            )
+
+            OrbToggleRow(
+                title = "Audio & Mic Bridge (Zero-Termux)",
+                subtitle = if (callbacks.audioBridgeRunning) {
+                    "Active — loopback speaker (:4714) & mic (:4715)"
+                } else {
+                    "Off — enable for NixOS speaker & murmure mic"
+                },
+                checked = callbacks.audioBridgeRunning,
+                enabled = true,
+                onCheckedChange = callbacks.onToggleAudioBridge
+            )
+
+            OrbToggleRow(
+                title = "Sunshine UDP Streaming",
+                subtitle = if (status.sunshineEnabled) {
+                    "Enabled — Moonlight streaming + adaptive profile"
+                } else {
+                    "Off — VNC loopback only (lower CPU/battery)"
+                },
+                checked = status.sunshineEnabled,
+                enabled = busyAction == null,
+                onCheckedChange = callbacks.onToggleSunshine
             )
         }
 

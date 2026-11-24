@@ -40,6 +40,8 @@ DISPLAY_MODE="1920x1080@60"
 DISPLAY_SCALE="1"
 PROFILE="balanced"
 GPU_MODE="hw"
+CHARGE_CAP="0"
+SUNSHINE_ENABLED="true"
 
 log() {
     ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '0000-00-00 00:00:00')"
@@ -71,14 +73,18 @@ load_state() {
     DISPLAY_SCALE="1"
     PROFILE="balanced"
     GPU_MODE="hw"
+    CHARGE_CAP="0"
+    SUNSHINE_ENABLED="true"
 
     if [ -r "$STATE_FILE" ]; then
         while IFS='=' read -r key val; do
             case "$key" in
-                DISPLAY_MODE)  [ -n "$val" ] && DISPLAY_MODE="$val" ;;
-                DISPLAY_SCALE) [ -n "$val" ] && DISPLAY_SCALE="$val" ;;
-                PROFILE)       [ -n "$val" ] && PROFILE="$val" ;;
-                GPU_MODE)      [ -n "$val" ] && GPU_MODE="$val" ;;
+                DISPLAY_MODE)     [ -n "$val" ] && DISPLAY_MODE="$val" ;;
+                DISPLAY_SCALE)    [ -n "$val" ] && DISPLAY_SCALE="$val" ;;
+                PROFILE)          [ -n "$val" ] && PROFILE="$val" ;;
+                GPU_MODE)         [ -n "$val" ] && GPU_MODE="$val" ;;
+                CHARGE_CAP)       [ -n "$val" ] && CHARGE_CAP="$val" ;;
+                SUNSHINE_ENABLED) [ -n "$val" ] && SUNSHINE_ENABLED="$val" ;;
             esac
         done < "$STATE_FILE"
     fi
@@ -92,6 +98,8 @@ save_state() {
         printf 'DISPLAY_SCALE=%s\n' "$DISPLAY_SCALE"
         printf 'PROFILE=%s\n' "$PROFILE"
         printf 'GPU_MODE=%s\n' "$GPU_MODE"
+        printf 'CHARGE_CAP=%s\n' "$CHARGE_CAP"
+        printf 'SUNSHINE_ENABLED=%s\n' "$SUNSHINE_ENABLED"
     } > "$tmp_file"
     mv "$tmp_file" "$STATE_FILE"
 }
@@ -263,6 +271,22 @@ read_thermals_and_power() {
     if [ -c /dev/fastrpc-cdsp ] && [ -r /vendor/dsp/cdsp/fastrpc_shell_unsigned_3 ]; then
         NPU_READY="true"
     fi
+
+    # Live hinge / fold state (Razr 60 Ultra active-low /sys/class/hall/rawdata: 0 = closed)
+    LID_CLOSED="false"
+    if [ -r /sys/class/hall/rawdata ]; then
+        hall_v="$(tr -dc '0-9' < /sys/class/hall/rawdata 2>/dev/null || true)"
+        [ "$hall_v" = "0" ] && LID_CLOSED="true"
+    fi
+
+    # Live kernel charge_control_end_threshold overrides state if set
+    LIVE_CHARGE_CAP="$CHARGE_CAP"
+    if [ -r /sys/class/power_supply/battery/charge_control_end_threshold ]; then
+        kcap="$(tr -dc '0-9' < /sys/class/power_supply/battery/charge_control_end_threshold 2>/dev/null || true)"
+        if is_uint "$kcap" && [ "$kcap" -gt 0 ]; then
+            LIVE_CHARGE_CAP="$kcap"
+        fi
+    fi
 }
 
 detect_network() {
@@ -379,7 +403,7 @@ EOF
         bt_hid_val="true"
     fi
 
-    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"soc_temp_c":%s,"batt_temp_c":%s,"power_mw":%s,"npu_ready":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
+    printf '{"container_running":%s,"container_pid":%s,"uptime":"%s","systemd_state":"%s","desktop_running":%s,"vnc_port":%s,"display_mode":"%s","display_scale":"%s","network_type":"%s","ip_address":"%s","sshd_running":%s,"ssh_port":%s,"mem_used_mb":%s,"mem_total_mb":%s,"cpu_pct":%s,"gpu_pct":%s,"soc_temp_c":%s,"batt_temp_c":%s,"power_mw":%s,"npu_ready":%s,"lid_closed":%s,"charge_cap":%s,"sunshine_enabled":%s,"profile":"%s","autostart":%s,"gpu_mode":"%s","bt_hid_grab":%s}\n' \
         "$c_running" \
         "$c_pid" \
         "$(json_escape "$c_uptime")" \
@@ -400,6 +424,9 @@ EOF
         "$BATT_TEMP_C" \
         "$POWER_MW" \
         "$NPU_READY" \
+        "$LID_CLOSED" \
+        "${LIVE_CHARGE_CAP:-0}" \
+        "${SUNSHINE_ENABLED:-true}" \
         "$(json_escape "$PROFILE")" \
         "$autostart_val" \
         "$(json_escape "$GPU_MODE")" \
@@ -432,7 +459,19 @@ cmd_container_start() {
     fi
 
     ensure_rootfs_mounted
+    mkdir -p "${MNT_DIR}/run/host-vendor-dsp" "${MNT_DIR}/run/host-vendor-lib64" 2>/dev/null || true
+
+    # Build optional hardware bind-mounts (Hexagon V79 NPU DSP/FastRPC + Qualcomm Venus V4L2)
+    extra_binds=""
+    [ -d /vendor/dsp ] && extra_binds="${extra_binds} --bind=/vendor/dsp:/run/host-vendor-dsp"
+    [ -d /vendor/lib64 ] && extra_binds="${extra_binds} --bind=/vendor/lib64:/run/host-vendor-lib64"
+    [ -c /dev/fastrpc-cdsp ] && extra_binds="${extra_binds} --bind=/dev/fastrpc-cdsp:/dev/fastrpc-cdsp"
+    [ -c /dev/fastrpc-cdsp-secure ] && extra_binds="${extra_binds} --bind=/dev/fastrpc-cdsp-secure:/dev/fastrpc-cdsp-secure"
+    [ -c /dev/video32 ] && extra_binds="${extra_binds} --bind=/dev/video32:/dev/video32"
+    [ -c /dev/video33 ] && extra_binds="${extra_binds} --bind=/dev/video33:/dev/video33"
+
     log "Starting container '${CONTAINER_NAME}' via droidspaces..."
+    # shellcheck disable=SC2086
     "$DROIDSPACES_BIN" start \
         --name="$CONTAINER_NAME" \
         --hostname="$CONTAINER_HOSTNAME" \
@@ -440,14 +479,17 @@ cmd_container_start() {
         --net=host \
         --gpu \
         --init=/sbin/init \
-        --bind="${ANDROID_STORAGE}:/mnt/android" || die "droidspaces start failed"
+        --bind="${ANDROID_STORAGE}:/mnt/android" \
+        $extra_binds || die "droidspaces start failed"
 
     pid="$(container_pid || echo unknown)"
     log "Container '${CONTAINER_NAME}' started (PID ${pid})."
 
-    # Re-apply persisted performance profile if set.
+    # Re-apply persisted performance profile & battery charge cap if set.
     load_state
     apply_profile_live "$PROFILE" || true
+    [ "${CHARGE_CAP:-0}" -gt 0 ] 2>/dev/null && apply_charge_cap_live "$CHARGE_CAP" || true
+    ensure_container_hw_bridge || true
 }
 
 cmd_container_stop() {
@@ -830,18 +872,25 @@ fi
 WAYLAND_DISPLAY="$SWAY_SOCK" \
     nohup wayvnc -r -f 60 127.0.0.1 "$VNC_PORT" >"${XDG_RUNTIME_DIR}/wayvnc.log" 2>&1 </dev/null &
 
-# Launch Sunshine (ultra-low-latency UDP H.264/HEVC streaming for Moonlight clients).
-SUNSHINE_BIN="$(command -v sunshine 2>/dev/null || ls -1 /nix/store/*-sunshine-*/bin/sunshine 2>/dev/null | head -n 1 || true)"
-if [ -n "$SUNSHINE_BIN" ] && [ -x "$SUNSHINE_BIN" ]; then
-    mkdir -p "${HOME}/.config/sunshine"
-    if [ ! -f "${HOME}/.config/sunshine/sunshine.conf" ]; then
+# Launch Sunshine (ultra-low-latency UDP H.264/HEVC streaming for Moonlight clients) when enabled.
+SUNSHINE_ENABLED="${5:-true}"
+PROFILE_HINT="${6:-balanced}"
+if [ "$SUNSHINE_ENABLED" = "true" ]; then
+    SUNSHINE_BIN="$(command -v sunshine 2>/dev/null || ls -1 /nix/store/*-sunshine-*/bin/sunshine 2>/dev/null | head -n 1 || true)"
+    if [ -n "$SUNSHINE_BIN" ] && [ -x "$SUNSHINE_BIN" ]; then
+        mkdir -p "${HOME}/.config/sunshine"
+        case "$PROFILE_HINT" in
+            eco|power-saver) SUN_THREADS=2; SUN_QP=26 ;;
+            full|performance) SUN_THREADS=6; SUN_QP=20 ;;
+            *) SUN_THREADS=4; SUN_QP=22 ;;
+        esac
         cat > "${HOME}/.config/sunshine/sunshine.conf" <<SUNEOF
 capture = wlr
 encoder = software
 sw_preset = ultrafast
 sw_tune = zerolatency
-min_threads = 4
-qp = 22
+min_threads = ${SUN_THREADS}
+qp = ${SUN_QP}
 lan_encryption_mode = 0
 fec_percentage = 5
 upnp = disabled
@@ -849,9 +898,9 @@ origin_web_ui_allowed = lan
 sunshine_name = Razr-SideSystem
 min_log_level = info
 SUNEOF
+        WAYLAND_DISPLAY="$HYPR_SOCK" \
+            nohup "$SUNSHINE_BIN" "${HOME}/.config/sunshine/sunshine.conf" >"${XDG_RUNTIME_DIR}/sunshine.log" 2>&1 </dev/null &
     fi
-    WAYLAND_DISPLAY="$HYPR_SOCK" \
-        nohup "$SUNSHINE_BIN" "${HOME}/.config/sunshine/sunshine.conf" >"${XDG_RUNTIME_DIR}/sunshine.log" 2>&1 </dev/null &
 fi
 
 exit 0
@@ -859,15 +908,16 @@ EOF
 
     "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run \
         /run/current-system/sw/bin/su - "$CONTAINER_USER" -c \
-        "/bin/sh /tmp/sidesystem-desktop-start.sh '${SWAY_RES}' '${DISPLAY_SCALE}' '${GPU_MODE}' '${VNC_PORT}'" \
+        "/bin/sh /tmp/sidesystem-desktop-start.sh '${SWAY_RES}' '${DISPLAY_SCALE}' '${GPU_MODE}' '${VNC_PORT}' '${SUNSHINE_ENABLED}' '${PROFILE}'" \
         || die "Failed to start desktop session inside container"
 
     ensure_container_hw_bridge
-    # Ensure Sunshine uinput -> Wayland input bridge is running (works completely cable-free!)
-    # Keep Android's normal soft keyboard enabled even while Sunshine's virtual uinput keyboard exists.
+    # Always keep Android's soft keyboard (Gboard) enabled even when virtual/BT HID devices exist.
     settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
-    if [ -x "${BASE_DIR}/bin/bt-hid-bridge" ]; then
-        killall bt-hid-bridge 2>/dev/null || true
+    settings put secure stylus_handwriting_enabled 0 >/dev/null 2>&1 || true
+    # Only start Sunshine's uinput -> Wayland input bridge when Sunshine itself is enabled.
+    killall bt-hid-bridge 2>/dev/null || true
+    if [ "$SUNSHINE_ENABLED" = "true" ] && [ -x "${BASE_DIR}/bin/bt-hid-bridge" ]; then
         sleep 0.2
         setsid "${BASE_DIR}/bin/bt-hid-bridge" --sunshine "$VNC_PORT" >"${BASE_DIR}/sunshine-input.log" 2>&1 </dev/null &
     fi
@@ -958,7 +1008,25 @@ TIDEOF
         done
     ' >/dev/null 2>&1 || true
 
-    # Start single-instance host-side power-profile request watcher on shared F2FS /var/lib/sidesystem
+    # Prefer event-driven Unix-socket daemon `sidesystem-bridged` (zero idle wakeups, <10ms Touch ID/FIDO2).
+    bridged_bin="${BASE_DIR}/bin/sidesystem-bridged"
+    bridged_pid_file="${BASE_DIR}/bridged.pid"
+    if [ -x "$bridged_bin" ]; then
+        if [ -r "$bridged_pid_file" ]; then
+            old_bpid="$(cat "$bridged_pid_file" 2>/dev/null || true)"
+            if [ -n "$old_bpid" ] && [ -r "/proc/${old_bpid}/cmdline" ] && tr '\0' ' ' < "/proc/${old_bpid}/cmdline" 2>/dev/null | grep -q "sidesystem-bridged"; then
+                return 0
+            fi
+        fi
+        # Stop legacy polling powerd if running
+        for p in $(pgrep -f '[s]idesystem-powerd' 2>/dev/null || true); do
+            kill "$p" 2>/dev/null || true
+        done
+        setsid "$bridged_bin" >"${BASE_DIR}/bridged.log" 2>&1 </dev/null &
+        return 0
+    fi
+
+    # Fallback: single-instance host-side power-profile request watcher on shared F2FS /var/lib/sidesystem
     # so Omarchy Shell top bar can switch Oryon CPU + Adreno 830 GPU clocks directly from inside NixOS.
     pwrd_pid_file="${BASE_DIR}/powerd.pid"
     if [ -r "$pwrd_pid_file" ]; then
@@ -1345,6 +1413,82 @@ cmd_bt_hid() {
     esac
 }
 
+# ---------------------------------------------------------------------------
+# charge-cap off | 80 | 90 | <60..99>
+# ---------------------------------------------------------------------------
+apply_charge_cap_live() {
+    cap="$1"
+    mkdir -p "${MNT_DIR}/var/lib/sidesystem" 2>/dev/null || true
+    printf '%s\n' "$cap" > "${MNT_DIR}/var/lib/sidesystem/charge-cap" 2>/dev/null || true
+
+    if [ "$cap" -le 0 ] || [ "$cap" -ge 100 ]; then
+        printf '0\n' > /sys/class/power_supply/battery/charge_control_end_threshold 2>/dev/null || true
+        printf '0\n' > /sys/class/power_supply/battery/charge_control_start_threshold 2>/dev/null || true
+        printf '0\n' > /sys/class/power_supply/battery/input_suspend 2>/dev/null || true
+    else
+        start_pct=$((cap - 5))
+        [ "$start_pct" -lt 55 ] && start_pct="$cap"
+        printf '%s\n' "$start_pct" > /sys/class/power_supply/battery/charge_control_start_threshold 2>/dev/null || true
+        printf '%s\n' "$cap" > /sys/class/power_supply/battery/charge_control_end_threshold 2>/dev/null || true
+    fi
+}
+
+cmd_charge_cap() {
+    val="${1:-}"
+    case "$val" in
+        off|0|100) cap=0 ;;
+        *)
+            if is_uint "$val" && [ "$val" -ge 60 ] && [ "$val" -le 99 ]; then
+                cap="$val"
+            else
+                die "Usage: sidesystem-ctl charge-cap <off|80|90|60..99>"
+            fi
+            ;;
+    esac
+    load_state
+    CHARGE_CAP="$cap"
+    save_state
+    apply_charge_cap_live "$cap"
+    log "Battery charge cap set to '${cap}' (0=off)."
+}
+
+# ---------------------------------------------------------------------------
+# sunshine on | off
+# ---------------------------------------------------------------------------
+cmd_sunshine() {
+    mode="${1:-}"
+    load_state
+    case "$mode" in
+        on|true)  SUNSHINE_ENABLED="true" ;;
+        off|false) SUNSHINE_ENABLED="false" ;;
+        *) die "Usage: sidesystem-ctl sunshine <on|off>" ;;
+    esac
+    save_state
+    if [ "$SUNSHINE_ENABLED" = "false" ] && container_pid >/dev/null 2>&1; then
+        "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c 'pkill -TERM -f "[s]unshine" 2>/dev/null || true; sleep 0.3; pkill -KILL -f "[s]unshine" 2>/dev/null || true' >/dev/null 2>&1 || true
+        killall bt-hid-bridge 2>/dev/null || true
+    fi
+    settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
+    settings put secure stylus_handwriting_enabled 0 >/dev/null 2>&1 || true
+    log "Sunshine streaming set to '${SUNSHINE_ENABLED}' (restart desktop to start if enabled)."
+}
+
+# ---------------------------------------------------------------------------
+# npu check
+# ---------------------------------------------------------------------------
+cmd_npu() {
+    echo "=== Android Host Hexagon V79 NPU ==="
+    ls -la /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure 2>/dev/null || echo "[MISSING] /dev/fastrpc-cdsp*"
+    ls -la /vendor/dsp/cdsp/fastrpc_shell_unsigned_3 2>/dev/null || echo "[MISSING] fastrpc_shell_unsigned_3"
+    ls -la /vendor/lib64/libQnnHtpV79Stub.so /vendor/lib64/libcdsprpc.so 2>/dev/null || true
+    if container_pid >/dev/null 2>&1; then
+        echo "=== NixOS Container Visibility ==="
+        "$DROIDSPACES_BIN" --name="$CONTAINER_NAME" run /bin/sh -c '
+            ls -la /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure /run/host-vendor-dsp/cdsp/fastrpc_shell_unsigned_3 /run/host-vendor-lib64/libQnnHtpV79Stub.so 2>&1 || true
+        '
+    fi
+}
+
 usage() {
     cat <<'EOF'
 Usage: sidesystem-ctl <command> [args...]
@@ -1357,6 +1501,9 @@ Commands:
                                              scale: 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2
   bt-hid <on|off>                            Route Bluetooth keyboard & mouse directly to NixOS
   profile <eco|balanced|full>                Set & apply live CPU/nice profile
+  charge-cap <off|80|90>                     Set Razr battery charge threshold (native kernel)
+  sunshine <on|off>                          Enable/disable Sunshine UDP streaming
+  npu check                                  Verify Hexagon V79 NPU host & container visibility
   autostart <on|off>                         Enable/disable Magisk boot autostart
   sshd <on|off>                              Start/stop sshd.service inside container
   gpu <sw|hw>                                Persist GPU rendering mode (llvmpipe / Zink+Turnip)
@@ -1371,17 +1518,20 @@ main() {
     [ $# -gt 0 ] && shift
 
     case "$cmd" in
-        status)    cmd_status "$@" ;;
-        container) cmd_container "$@" ;;
-        desktop)   cmd_desktop "$@" ;;
-        bt-hid)    cmd_bt_hid "$@" ;;
-        profile)   cmd_profile "$@" ;;
-        autostart) cmd_autostart "$@" ;;
-        sshd)      cmd_sshd "$@" ;;
-        gpu)       cmd_gpu "$@" ;;
-        clipboard) cmd_clipboard "$@" ;;
-        backup)    cmd_backup "$@" ;;
-        logs)      cmd_logs "$@" ;;
+        status)     cmd_status "$@" ;;
+        container)  cmd_container "$@" ;;
+        desktop)    cmd_desktop "$@" ;;
+        bt-hid)     cmd_bt_hid "$@" ;;
+        profile)    cmd_profile "$@" ;;
+        charge-cap) cmd_charge_cap "$@" ;;
+        sunshine)   cmd_sunshine "$@" ;;
+        npu)        cmd_npu "$@" ;;
+        autostart)  cmd_autostart "$@" ;;
+        sshd)       cmd_sshd "$@" ;;
+        gpu)        cmd_gpu "$@" ;;
+        clipboard)  cmd_clipboard "$@" ;;
+        backup)     cmd_backup "$@" ;;
+        logs)       cmd_logs "$@" ;;
         -h|--help|"") usage ;;
         *)         usage >&2; die "Unknown command: ${cmd}" ;;
     esac

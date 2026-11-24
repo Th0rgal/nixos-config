@@ -206,6 +206,18 @@ class DesktopActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Never leave sticky modifiers or a hidden IME focus dangling when switching to other Android apps.
+        releaseStickyModifiers()
+        keyboardVisible = false
+        val imm = getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+        currentFocus?.windowToken?.let { token ->
+            imm?.hideSoftInputFromWindow(token, 0)
+        }
+        window.decorView.clearFocus()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         releaseStickyModifiers()
@@ -658,15 +670,22 @@ class DesktopActivity : ComponentActivity() {
             }
 
             // 5. Floating modifier & nav shortcut bar sitting cleanly above the Android soft keyboard
+            //    (respects Razr 60 Ultra bottom-right twin cameras if opened on the cover screen).
+            val isCover = sBounds.height() < 1500 && sBounds.width() < 1500
             AnimatedVisibility(
                 visible = keyboardVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(if (isCover) Alignment.BottomStart else Alignment.BottomCenter)
                     .imePadding()
                     .navigationBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .padding(
+                        start = 8.dp,
+                        end = if (isCover) 224.dp else 8.dp,
+                        top = 6.dp,
+                        bottom = 6.dp
+                    )
             ) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),

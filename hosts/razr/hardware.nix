@@ -57,6 +57,91 @@ let
     '';
   };
 
+  sidesystemBridged = pkgs.stdenv.mkDerivation {
+    pname = "sidesystem-bridged";
+    version = "1.0.0";
+    dontUnpack = true;
+    buildPhase = ''
+      $CC -O2 -Wall -Wextra -Werror ${./android/sidesystem-bridged.c} -o sidesystem-bridged
+    '';
+    installPhase = ''
+      install -Dm755 sidesystem-bridged $out/bin/sidesystem-bridged
+    '';
+  };
+
+  razrNpuCheck = pkgs.writeShellScriptBin "razr-npu-check" ''
+    set -eu
+    echo "=== Hexagon V79 NPU Container Diagnostics ==="
+    for dev in /dev/fastrpc-cdsp /dev/fastrpc-cdsp-secure; do
+      if [ -c "$dev" ]; then
+        echo "[OK] $dev ($(ls -l "$dev" | awk '{print $1, $3, $4, $5, $6}'))"
+      else
+        echo "[MISSING] $dev"
+      fi
+    done
+    if [ -r /run/host-vendor-dsp/cdsp/fastrpc_shell_unsigned_3 ]; then
+      echo "[OK] Unsigned CDSP PD shell: /run/host-vendor-dsp/cdsp/fastrpc_shell_unsigned_3"
+    else
+      echo "[MISSING] /run/host-vendor-dsp/cdsp/fastrpc_shell_unsigned_3 (restart container to mount /vendor/dsp)"
+    fi
+    if [ -r /run/host-vendor-lib64/libQnnHtpV79Stub.so ]; then
+      echo "[OK] QNN HTP V79 stub: /run/host-vendor-lib64/libQnnHtpV79Stub.so"
+    else
+      echo "[MISSING] /run/host-vendor-lib64/libQnnHtpV79Stub.so"
+    fi
+    echo "ADSP_LIBRARY_PATH=''${ADSP_LIBRARY_PATH:-<unset>}"
+    echo "DSP_LIBRARY_PATH=''${DSP_LIBRARY_PATH:-<unset>}"
+  '';
+
+  sidesystemAudioBridge = pkgs.writeShellScript "sidesystem-audio-bridge" ''
+    set -u
+    export PATH="${
+      pkgs.lib.makeBinPath [
+        pkgs.pulseaudio
+        pkgs.socat
+        pkgs.coreutils
+      ]
+    }:$PATH"
+    # Wait for PulseAudio/PipeWire socket to come up
+    i=0
+    while [ "$i" -lt 30 ]; do
+      pactl info >/dev/null 2>&1 && break
+      sleep 1
+      i=$((i + 1))
+    done
+    pactl info >/dev/null 2>&1 || exit 0
+
+    # Create virtual sink ("SideSystem Speaker") and source ("SideSystem Mic")
+    if ! pactl list short sinks | grep -q "sidesystem_speaker"; then
+      pactl load-module module-null-sink sink_name=sidesystem_speaker \
+        sink_properties=device.description=SideSystem_Speaker rate=48000 channels=2 >/dev/null 2>&1 || true
+    fi
+    if ! pactl list short sources | grep -q "sidesystem_mic"; then
+      pactl load-module module-pipe-source source_name=sidesystem_mic \
+        file=/tmp/sidesystem-mic.pcm format=s16le rate=16000 channels=1 \
+        source_properties=device.description=SideSystem_Mic >/dev/null 2>&1 || true
+    fi
+
+    # Loopback playback forwarder (SideSystem Speaker monitor -> Android 127.0.0.1:4714)
+    (
+      while true; do
+        if socat -T 2 -u /dev/null TCP:127.0.0.1:4714 2>/dev/null; then
+          parec --device=sidesystem_speaker.monitor --format=s16le --rate=48000 --channels=2 --latency-msec=25 2>/dev/null \
+            | socat -u STDIN TCP:127.0.0.1:4714 2>/dev/null || true
+        fi
+        sleep 2
+      done
+    ) &
+
+    # Loopback microphone reader (Android 127.0.0.1:4715 -> /tmp/sidesystem-mic.pcm)
+    while true; do
+      if [ -p /tmp/sidesystem-mic.pcm ]; then
+        socat -u TCP:127.0.0.1:4715 OPEN:/tmp/sidesystem-mic.pcm,wronly 2>/dev/null || true
+      fi
+      sleep 2
+    done
+  '';
+
   sidesystemDbusPolicy = pkgs.writeTextDir "share/dbus-1/system.d/sidesystem.conf" ''
     <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
      "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -269,10 +354,27 @@ in
     })
   ];
 
+  environment.sessionVariables = {
+    ADSP_LIBRARY_PATH = "/run/host-vendor-dsp/cdsp;/run/host-vendor-dsp/adsp";
+    DSP_LIBRARY_PATH = "/run/host-vendor-dsp/cdsp;/run/host-vendor-dsp/adsp";
+  };
+
+  systemd.user.services.sidesystem-audio-bridge = {
+    description = "SideSystem Zero-Termux Android Loopback Audio & Mic Bridge";
+    wantedBy = [ "default.target" ];
+    serviceConfig = {
+      ExecStart = "${sidesystemAudioBridge}";
+      Restart = "always";
+      RestartSec = 3;
+    };
+  };
+
   environment.systemPackages = [
     sidesystemUpowerd
     sidesystemFprintd
     sidesystemFido2
+    sidesystemBridged
+    razrNpuCheck
     mesaRazrKgsl
     aquamarineRazr
     pkgs.fprintd
@@ -282,6 +384,7 @@ in
     pkgs.mesa-demos
     pkgs.ffmpeg
     pkgs.pulseaudio
+    pkgs.socat
   ];
 
   # Android secures the phone lockscreen; disable container hypridle auto-lock & keepalive.

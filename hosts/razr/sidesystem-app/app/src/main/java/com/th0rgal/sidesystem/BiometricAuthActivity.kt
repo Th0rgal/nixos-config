@@ -3,6 +3,8 @@ package com.th0rgal.sidesystem
 import android.app.Activity
 import android.hardware.biometrics.BiometricManager
 import android.hardware.biometrics.BiometricPrompt
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.security.keystore.KeyGenParameterSpec
@@ -41,6 +43,7 @@ class BiometricAuthActivity : Activity() {
     companion object {
         private const val PAM_KEY_ALIAS = "sidesystem_nixos_touchid_ecdsa"
         private const val FIDO2_KEY_PREFIX = "sidesystem_fido2_"
+        private const val BRIDGE_SOCK = "/data/local/nixos/rootfs/var/lib/sidesystem/bridge.sock"
         private const val RESP_FILE = "/data/local/nixos/rootfs/var/lib/sidesystem/bio-resp"
         private const val PUB_FILE = "/data/local/nixos/rootfs/var/lib/sidesystem/touchid.pub"
     }
@@ -263,6 +266,17 @@ class BiometricAuthActivity : Activity() {
         if (responded) return
         responded = true
         val safe = line.replace("'", "")
+        // Fast path: event-driven Unix socket directly to sidesystem-bridged (<10ms, no su fork)
+        try {
+            LocalSocket().use { sock ->
+                sock.connect(LocalSocketAddress(BRIDGE_SOCK, LocalSocketAddress.Namespace.FILESYSTEM))
+                val out = sock.outputStream
+                out.write("BIO_RESP $safe\n".toByteArray(Charsets.UTF_8))
+                out.flush()
+                return
+            }
+        } catch (_: Exception) {}
+        // Fallback: legacy bio-resp file
         try {
             val f = File(RESP_FILE)
             if (f.canWrite()) {

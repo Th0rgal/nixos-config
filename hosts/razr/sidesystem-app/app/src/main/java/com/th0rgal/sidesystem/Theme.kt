@@ -12,9 +12,21 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+
+val OrbSansFont = FontFamily(
+    Font(R.font.ibm_plex_sans_regular, FontWeight.Normal),
+    Font(R.font.ibm_plex_sans_medium, FontWeight.Medium),
+    Font(R.font.ibm_plex_sans_semibold, FontWeight.SemiBold)
+)
+
+val OrbMonoFont = FontFamily(
+    Font(R.font.lilex_regular, FontWeight.Normal),
+    Font(R.font.lilex_medium, FontWeight.Medium)
+)
 
 enum class ThemeMode(val key: String, val label: String) {
     SYSTEM("system", "System"),
@@ -142,61 +154,61 @@ private val OrbLightColorScheme = lightColorScheme(
 
 private val OrbTypography = Typography(
     headlineMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 26.sp,
         lineHeight = 32.sp,
         letterSpacing = (-0.5).sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 21.sp,
         lineHeight = 26.sp,
         letterSpacing = (-0.35).sp
     ),
     titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 22.sp,
         letterSpacing = (-0.2).sp
     ),
     titleSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.Medium,
         fontSize = 13.sp,
         lineHeight = 18.sp,
         letterSpacing = (-0.1).sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp
     ),
     bodySmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 18.sp,
         letterSpacing = (-0.1).sp
     ),
     labelMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = OrbSansFont,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.1.sp
     ),
     labelSmall = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = OrbMonoFont,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,

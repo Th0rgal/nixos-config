@@ -20,10 +20,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <time.h>
+#include <unistd.h>
 
+#define BRIDGE_SOCK_PATH   "/var/lib/sidesystem/bridge.sock"
 #define PROFILE_STATE_PATH "/var/lib/sidesystem/power-profile"
 #define PROFILE_REQ_PATH   "/var/lib/sidesystem/power-profile-req"
+#define CHARGE_CAP_PATH    "/var/lib/sidesystem/charge-cap"
+#define HINGE_STATE_PATH   "/var/lib/sidesystem/hinge-state"
 
 static const char *UPOWER_XML =
     "<node>"
@@ -145,6 +151,11 @@ typedef struct {
     double percentage;
     guint32 state; /* 1=charging, 2=discharging, 4=fully-charged */
     gboolean on_battery;
+    gboolean lid_is_present;
+    gboolean lid_is_closed;
+    guint32 charge_start_threshold;
+    guint32 charge_end_threshold;
+    gboolean charge_threshold_enabled;
     double energy;
     double energy_full;
     double energy_full_design;
@@ -163,6 +174,11 @@ static BattState g_st = {
     .percentage = 100.0,
     .state = 1,
     .on_battery = FALSE,
+    .lid_is_present = TRUE,
+    .lid_is_closed = FALSE,
+    .charge_start_threshold = 0,
+    .charge_end_threshold = 0,
+    .charge_threshold_enabled = FALSE,
     .energy = 18.0,
     .energy_full = 18.0,
     .energy_full_design = 18.0,
@@ -188,11 +204,47 @@ static int read_str(const char *path, char *buf, size_t sz) {
     return 0;
 }
 
+static gboolean bridge_rpc(const char *cmd, char *reply, size_t reply_sz) {
+    int sfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sfd < 0) return FALSE;
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", BRIDGE_SOCK_PATH);
+    if (connect(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(sfd);
+        return FALSE;
+    }
+    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+    setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    size_t len = strlen(cmd);
+    if (send(sfd, cmd, len, MSG_NOSIGNAL) != (ssize_t)len ||
+        send(sfd, "\n", 1, MSG_NOSIGNAL) != 1) {
+        close(sfd);
+        return FALSE;
+    }
+    if (reply && reply_sz > 0) {
+        ssize_t n = recv(sfd, reply, reply_sz - 1, 0);
+        if (n > 0) {
+            reply[n] = '\0';
+            while (n > 0 && (reply[n - 1] == '\n' || reply[n - 1] == '\r')) reply[--n] = '\0';
+        } else {
+            reply[0] = '\0';
+        }
+    }
+    close(sfd);
+    return TRUE;
+}
+
 static void write_profile_state(const char *prof) {
     FILE *f = fopen(PROFILE_STATE_PATH, "w");
     if (f) { fprintf(f, "%s\n", prof); fclose(f); }
-    FILE *r = fopen(PROFILE_REQ_PATH, "w");
-    if (r) { fprintf(r, "%s\n", prof); fclose(r); }
+    char cmd[64], reply[64];
+    snprintf(cmd, sizeof(cmd), "PROFILE_SET %s", prof);
+    if (!bridge_rpc(cmd, reply, sizeof(reply))) {
+        FILE *r = fopen(PROFILE_REQ_PATH, "w");
+        if (r) { fprintf(r, "%s\n", prof); fclose(r); }
+    }
 }
 
 static void load_profile_state(void) {
@@ -223,6 +275,8 @@ static gboolean poll_sysfs(gpointer user_data) {
     double old_pct = g_st.percentage;
     guint32 old_state = g_st.state;
     gboolean old_on_batt = g_st.on_battery;
+    gboolean old_lid_closed = g_st.lid_is_closed;
+    guint32 old_end_thresh = g_st.charge_end_threshold;
 
     g_st.update_time = (guint64)time(NULL);
 
@@ -271,9 +325,55 @@ static gboolean poll_sysfs(gpointer user_data) {
     if (read_str("/sys/class/power_supply/battery/cycle_count", buf, sizeof(buf)) == 0)
         g_st.charge_cycles = atoi(buf);
 
+    /* Charge thresholds: prefer live kernel sysfs, fallback to persisted /var/lib/sidesystem/charge-cap */
+    int end_t = 0, start_t = 0;
+    if (read_str("/sys/class/power_supply/battery/charge_control_end_threshold", buf, sizeof(buf)) == 0) {
+        end_t = atoi(buf);
+    }
+    if (end_t <= 0 && read_str(CHARGE_CAP_PATH, buf, sizeof(buf)) == 0) {
+        end_t = atoi(buf);
+    }
+    if (read_str("/sys/class/power_supply/battery/charge_control_start_threshold", buf, sizeof(buf)) == 0) {
+        start_t = atoi(buf);
+    }
+    if (end_t > 0 && end_t < 100) {
+        g_st.charge_end_threshold = (guint32)end_t;
+        g_st.charge_start_threshold = (start_t > 0) ? (guint32)start_t : (guint32)(end_t > 5 ? end_t - 5 : end_t);
+        g_st.charge_threshold_enabled = TRUE;
+    } else {
+        g_st.charge_end_threshold = 0;
+        g_st.charge_start_threshold = 0;
+        g_st.charge_threshold_enabled = FALSE;
+    }
+
+    /* Razr 60 Ultra Hall sensor (/sys/class/hall/rawdata: 0 = CLOSED_HALL, 1 = open) */
+    if (read_str("/sys/class/hall/rawdata", buf, sizeof(buf)) == 0) {
+        g_st.lid_is_present = TRUE;
+        g_st.lid_is_closed = (strcmp(buf, "0") == 0);
+    } else {
+        char reply[64] = {0};
+        if (bridge_rpc("HINGE_GET", reply, sizeof(reply))) {
+            if (strcmp(reply, "OK closed") == 0) {
+                g_st.lid_is_present = TRUE;
+                g_st.lid_is_closed = TRUE;
+            } else if (strcmp(reply, "OK open") == 0) {
+                g_st.lid_is_present = TRUE;
+                g_st.lid_is_closed = FALSE;
+            }
+        } else if (read_str(HINGE_STATE_PATH, buf, sizeof(buf)) == 0) {
+            if (strcmp(buf, "closed") == 0) {
+                g_st.lid_is_present = TRUE;
+                g_st.lid_is_closed = TRUE;
+            } else if (strcmp(buf, "open") == 0) {
+                g_st.lid_is_present = TRUE;
+                g_st.lid_is_closed = FALSE;
+            }
+        }
+    }
+
     compute_icon(g_st.percentage, g_st.state, g_st.icon_name, sizeof(g_st.icon_name));
 
-    if (g_st.conn && (old_pct != g_st.percentage || old_state != g_st.state)) {
+    if (g_st.conn && (old_pct != g_st.percentage || old_state != g_st.state || old_end_thresh != g_st.charge_end_threshold)) {
         const char *paths[] = {
             "/org/freedesktop/UPower/devices/DisplayDevice",
             "/org/freedesktop/UPower/devices/battery_BAT0",
@@ -287,6 +387,9 @@ static gboolean poll_sysfs(gpointer user_data) {
             g_variant_builder_add(&b, "{sv}", "EnergyRate", g_variant_new_double(g_st.energy_rate));
             g_variant_builder_add(&b, "{sv}", "UpdateTime", g_variant_new_uint64(g_st.update_time));
             g_variant_builder_add(&b, "{sv}", "IconName", g_variant_new_string(g_st.icon_name));
+            g_variant_builder_add(&b, "{sv}", "ChargeStartThreshold", g_variant_new_uint32(g_st.charge_start_threshold));
+            g_variant_builder_add(&b, "{sv}", "ChargeEndThreshold", g_variant_new_uint32(g_st.charge_end_threshold));
+            g_variant_builder_add(&b, "{sv}", "ChargeThresholdEnabled", g_variant_new_boolean(g_st.charge_threshold_enabled));
             g_dbus_connection_emit_signal(
                 g_st.conn, NULL, paths[k],
                 "org.freedesktop.DBus.Properties", "PropertiesChanged",
@@ -294,10 +397,11 @@ static gboolean poll_sysfs(gpointer user_data) {
                 NULL);
         }
     }
-    if (g_st.conn && old_on_batt != g_st.on_battery) {
+    if (g_st.conn && (old_on_batt != g_st.on_battery || old_lid_closed != g_st.lid_is_closed)) {
         GVariantBuilder b;
         g_variant_builder_init(&b, G_VARIANT_TYPE_VARDICT);
         g_variant_builder_add(&b, "{sv}", "OnBattery", g_variant_new_boolean(g_st.on_battery));
+        g_variant_builder_add(&b, "{sv}", "LidIsClosed", g_variant_new_boolean(g_st.lid_is_closed));
         g_dbus_connection_emit_signal(
             g_st.conn, NULL,
             "/org/freedesktop/UPower",
@@ -329,8 +433,8 @@ static GVariant *upower_get_prop(GDBusConnection *c, const gchar *s, const gchar
     (void)c; (void)s; (void)o; (void)i; (void)err; (void)u;
     if (g_strcmp0(prop, "DaemonVersion") == 0) return g_variant_new_string("1.91.5");
     if (g_strcmp0(prop, "OnBattery") == 0)     return g_variant_new_boolean(g_st.on_battery);
-    if (g_strcmp0(prop, "LidIsClosed") == 0)   return g_variant_new_boolean(FALSE);
-    if (g_strcmp0(prop, "LidIsPresent") == 0)  return g_variant_new_boolean(FALSE);
+    if (g_strcmp0(prop, "LidIsClosed") == 0)   return g_variant_new_boolean(g_st.lid_is_closed);
+    if (g_strcmp0(prop, "LidIsPresent") == 0)  return g_variant_new_boolean(g_st.lid_is_present);
     return NULL;
 }
 
@@ -377,11 +481,11 @@ static GVariant *dev_get_prop(GDBusConnection *c, const gchar *s, const gchar *o
     if (g_strcmp0(prop, "WarningLevel") == 0)      return g_variant_new_uint32(1); /* None */
     if (g_strcmp0(prop, "BatteryLevel") == 0)      return g_variant_new_uint32(1); /* None */
     if (g_strcmp0(prop, "IconName") == 0)          return g_variant_new_string(g_st.icon_name);
-    if (g_strcmp0(prop, "ChargeStartThreshold") == 0)             return g_variant_new_uint32(0);
-    if (g_strcmp0(prop, "ChargeEndThreshold") == 0)               return g_variant_new_uint32(0);
-    if (g_strcmp0(prop, "ChargeThresholdEnabled") == 0)           return g_variant_new_boolean(FALSE);
-    if (g_strcmp0(prop, "ChargeThresholdSupported") == 0)         return g_variant_new_boolean(FALSE);
-    if (g_strcmp0(prop, "ChargeThresholdSettingsSupported") == 0) return g_variant_new_uint32(0);
+    if (g_strcmp0(prop, "ChargeStartThreshold") == 0)             return g_variant_new_uint32(g_st.charge_start_threshold);
+    if (g_strcmp0(prop, "ChargeEndThreshold") == 0)               return g_variant_new_uint32(g_st.charge_end_threshold);
+    if (g_strcmp0(prop, "ChargeThresholdEnabled") == 0)           return g_variant_new_boolean(g_st.charge_threshold_enabled);
+    if (g_strcmp0(prop, "ChargeThresholdSupported") == 0)         return g_variant_new_boolean(TRUE);
+    if (g_strcmp0(prop, "ChargeThresholdSettingsSupported") == 0) return g_variant_new_uint32(3);
     if (g_strcmp0(prop, "VoltageMinDesign") == 0)  return g_variant_new_double(3.4);
     if (g_strcmp0(prop, "VoltageMaxDesign") == 0)  return g_variant_new_double(4.5);
     if (g_strcmp0(prop, "CapacityLevel") == 0)     return g_variant_new_string("Normal");

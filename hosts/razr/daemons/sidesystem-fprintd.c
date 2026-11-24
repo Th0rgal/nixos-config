@@ -14,13 +14,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define BIO_REQ_PATH  "/var/lib/sidesystem/bio-req"
-#define BIO_RESP_PATH "/var/lib/sidesystem/bio-resp"
-#define BIO_PUB_PATH  "/var/lib/sidesystem/touchid.pub"
+#define BRIDGE_SOCK_PATH "/var/lib/sidesystem/bridge.sock"
+#define BIO_REQ_PATH     "/var/lib/sidesystem/bio-req"
+#define BIO_RESP_PATH    "/var/lib/sidesystem/bio-resp"
+#define BIO_PUB_PATH     "/var/lib/sidesystem/touchid.pub"
 
 static const char *MANAGER_XML =
     "<node>"
@@ -77,9 +80,11 @@ typedef struct {
     char nonce[64];
     guint poll_id;
     int poll_ticks;
+    int bridge_fd;
+    guint bridge_watch_id;
 } FprintState;
 
-static FprintState g_fp = {0};
+static FprintState g_fp = { .bridge_fd = -1 };
 
 static void emit_prop_changed(const char *prop, GVariant *val) {
     if (!g_fp.conn) return;
@@ -103,6 +108,14 @@ static void emit_verify_status(const char *result, gboolean done) {
 }
 
 static void stop_verify_internal(void) {
+    if (g_fp.bridge_watch_id) {
+        g_source_remove(g_fp.bridge_watch_id);
+        g_fp.bridge_watch_id = 0;
+    }
+    if (g_fp.bridge_fd >= 0) {
+        close(g_fp.bridge_fd);
+        g_fp.bridge_fd = -1;
+    }
     if (g_fp.poll_id) {
         g_source_remove(g_fp.poll_id);
         g_fp.poll_id = 0;
@@ -202,6 +215,61 @@ fail:
     return FALSE;
 }
 
+static void finish_bio_response_line(const char *raw_line) {
+    char line[1024];
+    snprintf(line, sizeof(line), "%s", raw_line);
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = '\0';
+
+    char prefix[80];
+    snprintf(prefix, sizeof(prefix), "OK %s ", g_fp.nonce);
+    gboolean ok = FALSE;
+    if (g_str_has_prefix(line, prefix)) {
+        const char *sig_b64 = line + strlen(prefix);
+        ok = verify_ecdsa_sig(g_fp.nonce, sig_b64);
+    }
+    stop_verify_internal();
+    emit_verify_status(ok ? "verify-match" : "verify-no-match", TRUE);
+}
+
+static gboolean on_bridge_bio_readable(gint fd, GIOCondition cond, gpointer user_data) {
+    (void)cond;
+    (void)user_data;
+    if (!g_fp.verifying) return G_SOURCE_REMOVE;
+
+    char line[1024] = {0};
+    ssize_t n = recv(fd, line, sizeof(line) - 1, 0);
+    if (n > 0) {
+        line[n] = '\0';
+        finish_bio_response_line(line);
+    } else {
+        stop_verify_internal();
+        emit_verify_status("verify-disconnected", TRUE);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static int start_bridge_bio_req(const char *nonce, const char *user) {
+    int sfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sfd < 0) return -1;
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", BRIDGE_SOCK_PATH);
+    if (connect(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(sfd);
+        return -1;
+    }
+    char req[512];
+    int len = snprintf(req, sizeof(req), "BIO_REQ %s|NixOS Touch ID (%s)\n",
+                       nonce, user ? user : "thomas");
+    if (len <= 0 || send(sfd, req, (size_t)len, MSG_NOSIGNAL) != len) {
+        close(sfd);
+        return -1;
+    }
+    return sfd;
+}
+
 static gboolean poll_bio_resp(gpointer user_data) {
     (void)user_data;
     if (!g_fp.verifying) return G_SOURCE_REMOVE;
@@ -215,20 +283,7 @@ static gboolean poll_bio_resp(gpointer user_data) {
             /* Truncate response file */
             FILE *tf = fopen(BIO_RESP_PATH, "w");
             if (tf) fclose(tf);
-
-            /* Strip trailing CR/LF */
-            size_t len = strlen(line);
-            while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = '\0';
-
-            char prefix[80];
-            snprintf(prefix, sizeof(prefix), "OK %s ", g_fp.nonce);
-            gboolean ok = FALSE;
-            if (g_str_has_prefix(line, prefix)) {
-                const char *sig_b64 = line + strlen(prefix);
-                ok = verify_ecdsa_sig(g_fp.nonce, sig_b64);
-            }
-            stop_verify_internal();
-            emit_verify_status(ok ? "verify-match" : "verify-no-match", TRUE);
+            finish_bio_response_line(line);
             return G_SOURCE_REMOVE;
         }
         fclose(f);
@@ -281,7 +336,27 @@ static void dev_method(GDBusConnection *c, const gchar *sender, const gchar *o, 
             g_dbus_method_invocation_return_dbus_error(inv, "net.reactivated.Fprint.Error.Internal", "urandom failed");
             return;
         }
-        /* Clear old response & write request for sidesystem-powerd -> BiometricAuthActivity */
+        /* Fast path: event-driven Unix socket to sidesystem-bridged */
+        int bfd = start_bridge_bio_req(g_fp.nonce, g_fp.claimed_user);
+        if (bfd >= 0) {
+            g_fp.bridge_fd = bfd;
+            g_fp.verifying = TRUE;
+            g_fp.finger_needed = TRUE;
+            g_fp.poll_ticks = 0;
+
+            g_dbus_method_invocation_return_value(inv, NULL);
+            emit_prop_changed("finger-needed", g_variant_new_boolean(TRUE));
+            g_dbus_connection_emit_signal(
+                g_fp.conn, NULL, "/net/reactivated/Fprint/Device/0",
+                "net.reactivated.Fprint.Device", "VerifyFingerSelected",
+                g_variant_new("(s)", "right-index-finger"),
+                NULL);
+            g_fp.bridge_watch_id = g_unix_fd_add(bfd, G_IO_IN | G_IO_HUP | G_IO_ERR,
+                                                 on_bridge_bio_readable, NULL);
+            return;
+        }
+
+        /* Fallback: clear old response & write request for legacy sidesystem-powerd */
         FILE *tf = fopen(BIO_RESP_PATH, "w");
         if (tf) fclose(tf);
         FILE *rf = fopen(BIO_REQ_PATH, "w");
