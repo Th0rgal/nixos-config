@@ -14,7 +14,10 @@ data class OrbRouterConfig(
     val apiKey: String = "",
     val fastModel: String = DEFAULT_FAST_MODEL,
     val deepAudioModel: String = DEFAULT_DEEP_MODEL,
-    val livePolishEnabled: Boolean = true
+    val livePolishEnabled: Boolean = true,
+    val autoTranslateTarget: String = "",
+    val translateLangA: String = "English",
+    val translateLangB: String = "French"
 ) {
     val isConfigured: Boolean get() = baseUrl.isNotBlank() && apiKey.isNotBlank()
 
@@ -22,6 +25,7 @@ data class OrbRouterConfig(
         const val DEFAULT_BASE_URL = "https://orbrouter.thomas.md/v1"
         const val DEFAULT_FAST_MODEL = "builtin/fast"
         const val DEFAULT_DEEP_MODEL = "builtin/smart"
+        val SUPPORTED_LANGUAGES = listOf("English", "French", "Portuguese", "Spanish", "German", "Italian")
 
         fun load(context: Context): OrbRouterConfig {
             val prefs = context.getSharedPreferences("orb_voice_prefs", Context.MODE_PRIVATE)
@@ -30,7 +34,10 @@ data class OrbRouterConfig(
                 apiKey = prefs.getString("orb_router_key", "") ?: "",
                 fastModel = prefs.getString("orb_router_fast_model", DEFAULT_FAST_MODEL) ?: DEFAULT_FAST_MODEL,
                 deepAudioModel = prefs.getString("orb_router_deep_model", DEFAULT_DEEP_MODEL) ?: DEFAULT_DEEP_MODEL,
-                livePolishEnabled = prefs.getBoolean("orb_router_live_polish", true)
+                livePolishEnabled = prefs.getBoolean("orb_router_live_polish", true),
+                autoTranslateTarget = prefs.getString("orb_router_auto_translate", "") ?: "",
+                translateLangA = prefs.getString("orb_translate_lang_a", "English") ?: "English",
+                translateLangB = prefs.getString("orb_translate_lang_b", "French") ?: "French"
             )
         }
 
@@ -41,10 +48,18 @@ data class OrbRouterConfig(
                 .putString("orb_router_fast_model", cfg.fastModel.trim().ifEmpty { DEFAULT_FAST_MODEL })
                 .putString("orb_router_deep_model", cfg.deepAudioModel.trim().ifEmpty { DEFAULT_DEEP_MODEL })
                 .putBoolean("orb_router_live_polish", cfg.livePolishEnabled)
+                .putString("orb_router_auto_translate", cfg.autoTranslateTarget.trim())
+                .putString("orb_translate_lang_a", cfg.translateLangA.trim().ifEmpty { "English" })
+                .putString("orb_translate_lang_b", cfg.translateLangB.trim().ifEmpty { "French" })
                 .apply()
         }
     }
 }
+
+data class LivePolishResult(
+    val cleaned: String,
+    val translated: String = ""
+)
 
 data class PolishedNoteResult(
     val title: String,
@@ -66,6 +81,74 @@ object OrbRouterClient {
         if (!obj.has(key) || obj.isNull(key)) return fallback
         val v = obj.optString(key, fallback).trim()
         return if (v.equals("null", ignoreCase = true)) fallback else v
+    }
+
+    /**
+     * A2) Fast bidirectional live interpreter OR single-target auto-translate in one round-trip.
+     * - When [bidirectionalLangA] & [bidirectionalLangB] are provided: detects which language was
+     *   spoken and translates to the OTHER language, returning both cleaned original + translation.
+     * - Otherwise when [cfg.autoTranslateTarget] is non-blank: cleans and translates to that target.
+     */
+    fun polishAndTranslateLive(
+        cfg: OrbRouterConfig,
+        rawText: String,
+        recentContext: List<TranscriptSegment>,
+        knownSpeakers: Collection<String>,
+        bidirectionalLangA: String? = null,
+        bidirectionalLangB: String? = null
+    ): LivePolishResult? {
+        if (!cfg.isConfigured || rawText.length < 2) return null
+        val isBidir = !bidirectionalLangA.isNullOrBlank() && !bidirectionalLangB.isNullOrBlank()
+        val targetLang = cfg.autoTranslateTarget.trim()
+        if (!isBidir && targetLang.isEmpty()) {
+            val cleaned = polishLiveSegment(cfg, rawText, recentContext, knownSpeakers) ?: return null
+            return LivePolishResult(cleaned = cleaned, translated = "")
+        }
+
+        val ctxLines = recentContext.takeLast(3).joinToString("\n") {
+            "${it.speakerName}: ${it.text}"
+        }
+        val namesHint = knownSpeakers.filter { !it.startsWith("Speaker ") }.joinToString(", ")
+        val systemPrompt = buildString {
+            append("You are an ultra-fast live speech autocorrector and interpreter. ")
+            if (isBidir) {
+                append("Speakers are conversing in $bidirectionalLangA and $bidirectionalLangB. ")
+                append("1) Fix ASR typos/punctuation in the spoken utterance in its original language (\"cleaned\"). ")
+                append("2) If spoken in $bidirectionalLangA, translate naturally into $bidirectionalLangB; if spoken in $bidirectionalLangB, translate naturally into $bidirectionalLangA (\"translated\"). ")
+                append("If spoken in another language, translate into $bidirectionalLangA. ")
+            } else {
+                append("1) Fix ASR typos/punctuation in the spoken utterance in its original language (\"cleaned\"). ")
+                append("2) Translate it naturally into $targetLang (\"translated\"). If it is already in $targetLang, set \"translated\" to \"\". ")
+            }
+            if (namesHint.isNotBlank()) append("Known speaker names: $namesHint. ")
+            append("Return ONLY valid JSON: {\"cleaned\":\"...\",\"translated\":\"...\"}")
+        }
+        val userPrompt = buildString {
+            if (ctxLines.isNotBlank()) {
+                append("Recent context:\n")
+                append(ctxLines)
+                append("\n\n")
+            }
+            append("Latest spoken line:\n")
+            append(rawText)
+        }
+        return try {
+            val raw = chatCompletion(
+                cfg = cfg,
+                model = cfg.fastModel,
+                systemPrompt = systemPrompt,
+                userContent = userPrompt,
+                maxTokens = 320,
+                timeoutMs = 8000
+            ) ?: return null
+            val json = extractJsonObject(raw) ?: return null
+            val cleaned = safeOptString(json, "cleaned", rawText).ifEmpty { rawText }
+            val translated = safeOptString(json, "translated", "")
+            LivePolishResult(cleaned = cleaned, translated = translated)
+        } catch (e: Exception) {
+            Log.d("OrbVoice", "Live translate skipped: ${e.message}")
+            null
+        }
     }
 
     /**

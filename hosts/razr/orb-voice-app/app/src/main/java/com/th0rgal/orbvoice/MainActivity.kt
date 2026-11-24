@@ -65,6 +65,8 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.AlertDialog
@@ -181,7 +183,8 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class VoiceTab(val label: String) {
-    LIVE("Live Stream"),
+    LIVE("Record"),
+    TRANSLATE("Translate"),
     NOTES("Notes")
 }
 
@@ -271,17 +274,29 @@ private fun OrbVoiceApp(
         if (activeTab == VoiceTab.NOTES) reloadNotes()
     }
     LaunchedEffect(recState.isRecording) {
-        if (recState.isRecording) activeTab = VoiceTab.LIVE
+        if (recState.isRecording) {
+            activeTab = if (recState.isTranslateMode) VoiceTab.TRANSLATE else VoiceTab.LIVE
+        }
     }
     LaunchedEffect(recState.lastCompletedNoteId) {
         if (recState.lastCompletedNoteId != null) reloadNotes()
+    }
+
+    fun startActiveModeCapture() {
+        val isTrans = activeTab == VoiceTab.TRANSLATE
+        VoiceRecorderService.startRecording(
+            context = context,
+            translateMode = isTrans,
+            langA = orbCfg.translateLangA,
+            langB = orbCfg.translateLangB
+        )
     }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
         if (perms[Manifest.permission.RECORD_AUDIO] == true) {
-            VoiceRecorderService.startRecording(context)
+            startActiveModeCapture()
         } else {
             showNotice("Microphone permission is required")
         }
@@ -303,8 +318,14 @@ private fun OrbVoiceApp(
             }.toTypedArray()
             permLauncher.launch(req)
         } else {
-            VoiceRecorderService.startRecording(context)
+            startActiveModeCapture()
         }
+    }
+
+    fun updateTranslatePair(langA: String, langB: String) {
+        val updated = orbCfg.copy(translateLangA = langA, translateLangB = langB)
+        OrbRouterConfig.save(context, updated)
+        orbCfg = updated
     }
 
     fun shareFile(path: String, mimeType: String, title: String) {
@@ -390,6 +411,9 @@ private fun OrbVoiceApp(
                     isCoverScreen = isCoverScreen,
                     keepScreenOn = keepScreenOn,
                     isDarkTheme = isDarkTheme,
+                    translateLangA = orbCfg.translateLangA,
+                    translateLangB = orbCfg.translateLangB,
+                    onUpdateTranslatePair = ::updateTranslatePair,
                     onToggleTheme = onToggleTheme,
                     onToggleKeepScreenOn = ::toggleKeepScreenOn,
                     onSelectTab = { activeTab = it },
@@ -424,7 +448,11 @@ private fun OrbVoiceApp(
                     activeTab = activeTab,
                     onToggleRecord = ::toggleRecord,
                     onToggleTab = {
-                        activeTab = if (activeTab == VoiceTab.LIVE) VoiceTab.NOTES else VoiceTab.LIVE
+                        activeTab = when (activeTab) {
+                            VoiceTab.LIVE -> VoiceTab.TRANSLATE
+                            VoiceTab.TRANSLATE -> VoiceTab.NOTES
+                            VoiceTab.NOTES -> VoiceTab.LIVE
+                        }
                     },
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -739,13 +767,21 @@ private fun CoverScreenVoiceDock(
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
-                        imageVector = if (recState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic,
+                        imageVector = when {
+                            recState.isRecording -> Icons.Rounded.Stop
+                            activeTab == VoiceTab.TRANSLATE -> Icons.Rounded.Translate
+                            else -> Icons.Rounded.Mic
+                        },
                         contentDescription = null,
                         tint = if (recState.isRecording) OrbFgStrong else OrbBg,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = if (recState.isRecording) VoiceNoteStore.formatTimestamp(recState.elapsedMs) else "Rec",
+                        text = when {
+                            recState.isRecording -> VoiceNoteStore.formatTimestamp(recState.elapsedMs)
+                            activeTab == VoiceTab.TRANSLATE -> "Trans"
+                            else -> "Rec"
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = if (recState.isRecording) OrbFgStrong else OrbBg
                     )
@@ -760,7 +796,11 @@ private fun CoverScreenVoiceDock(
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 Text(
-                    text = if (activeTab == VoiceTab.LIVE) "Notes" else "Live",
+                    text = when (activeTab) {
+                        VoiceTab.LIVE -> "Trans"
+                        VoiceTab.TRANSLATE -> "Notes"
+                        VoiceTab.NOTES -> "Rec"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = OrbFgStrong
                 )
@@ -778,6 +818,9 @@ private fun PhoneAndCoverBody(
     isCoverScreen: Boolean,
     keepScreenOn: Boolean,
     isDarkTheme: Boolean,
+    translateLangA: String,
+    translateLangB: String,
+    onUpdateTranslatePair: (String, String) -> Unit,
     onToggleTheme: () -> Unit,
     onToggleKeepScreenOn: () -> Unit,
     onSelectTab: (VoiceTab) -> Unit,
@@ -820,7 +863,16 @@ private fun PhoneAndCoverBody(
             Spacer(modifier = Modifier.height(6.dp))
         }
 
-        if (activeTab == VoiceTab.LIVE) {
+        if (activeTab == VoiceTab.TRANSLATE) {
+            TranslateLangBar(
+                langA = translateLangA,
+                langB = translateLangB,
+                onUpdate = onUpdateTranslatePair
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (activeTab == VoiceTab.LIVE || activeTab == VoiceTab.TRANSLATE) {
             LiveTranscriptStream(
                 recState = recState,
                 bottomPadding = if (isCoverScreen) 78.dp else 16.dp,
@@ -834,6 +886,69 @@ private fun PhoneAndCoverBody(
                 onSelectNote = onSelectNote,
                 modifier = Modifier.fillMaxWidth().weight(1f)
             )
+        }
+    }
+}
+
+@Composable
+private fun TranslateLangBar(
+    langA: String,
+    langB: String,
+    onUpdate: (String, String) -> Unit
+) {
+    val langs = OrbRouterConfig.SUPPORTED_LANGUAGES
+    fun nextLang(cur: String, other: String): String {
+        val idx = langs.indexOf(cur).coerceAtLeast(0)
+        for (offset in 1..langs.size) {
+            val cand = langs[(idx + offset) % langs.size]
+            if (cand != other) return cand
+        }
+        return cur
+    }
+    Surface(
+        color = OrbSurface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, OrbBlue.copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(OrbSurfaceHover)
+                    .clickable { onUpdate(nextLang(langA, langB), langB) }
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(langA, style = MaterialTheme.typography.labelLarge, color = OrbFgStrong)
+            }
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(OrbBlue.copy(alpha = 0.16f))
+                    .clickable { onUpdate(langB, langA) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.SwapHoriz, "Swap languages", tint = OrbBlue, modifier = Modifier.size(16.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(OrbSurfaceHover)
+                    .clickable { onUpdate(langA, nextLang(langB, langA)) }
+                    .padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(langB, style = MaterialTheme.typography.labelLarge, color = OrbFgStrong)
+            }
         }
     }
 }
@@ -1120,6 +1235,7 @@ private data class SpeakerTurnGroup(
     val startMs: Long,
     val endMs: Long,
     val paragraphs: List<String>,
+    val translations: List<String> = emptyList(),
     val livePartial: String? = null
 )
 
@@ -1133,11 +1249,13 @@ private fun groupConsecutiveSegments(
     val groups = mutableListOf<SpeakerTurnGroup>()
     for (seg in segments) {
         val last = groups.lastOrNull()
+        val tr = seg.translatedText.trim()
         if (last != null && last.speakerIndex == seg.speakerIndex) {
             groups[groups.lastIndex] = last.copy(
                 speakerName = seg.speakerName,
                 endMs = maxOf(last.endMs, seg.endMs),
-                paragraphs = last.paragraphs + seg.text
+                paragraphs = last.paragraphs + seg.text,
+                translations = if (tr.isNotEmpty()) last.translations + tr else last.translations
             )
         } else {
             groups.add(
@@ -1146,7 +1264,8 @@ private fun groupConsecutiveSegments(
                     speakerName = seg.speakerName,
                     startMs = seg.startMs,
                     endMs = seg.endMs,
-                    paragraphs = listOf(seg.text)
+                    paragraphs = listOf(seg.text),
+                    translations = if (tr.isNotEmpty()) listOf(tr) else emptyList()
                 )
             )
         }
@@ -1238,6 +1357,7 @@ private fun LiveTranscriptStream(
                 speakerName = grp.speakerName,
                 timestamp = ts,
                 paragraphs = grp.paragraphs,
+                translations = grp.translations,
                 livePartial = grp.livePartial,
                 color = sColor,
                 useSerif = false,
@@ -1255,6 +1375,7 @@ private fun SpeakerGroupCard(
     speakerName: String,
     timestamp: String,
     paragraphs: List<String>,
+    translations: List<String> = emptyList(),
     livePartial: String? = null,
     color: androidx.compose.ui.graphics.Color,
     useSerif: Boolean,
@@ -1314,6 +1435,13 @@ private fun SpeakerGroupCard(
                 if (paragraphs.isNotEmpty()) {
                     Text(
                         text = paragraphs.joinToString(" "),
+                        style = if (translations.isNotEmpty()) MaterialTheme.typography.bodySmall else bodyStyle,
+                        color = if (translations.isNotEmpty()) OrbFgMuted else OrbFgStrong
+                    )
+                }
+                if (translations.isNotEmpty()) {
+                    Text(
+                        text = "→ ${translations.joinToString(" ")}",
                         style = bodyStyle,
                         color = OrbFgStrong
                     )
@@ -1584,6 +1712,7 @@ private fun NoteDetailSheet(
                         speakerName = grp.speakerName,
                         timestamp = "${VoiceNoteStore.formatTimestamp(grp.startMs)} – ${VoiceNoteStore.formatTimestamp(grp.endMs)}",
                         paragraphs = grp.paragraphs,
+                        translations = grp.translations,
                         color = sColor,
                         useSerif = true,
                         onClickSpeaker = { onRenameSpeaker(grp.speakerIndex, grp.speakerName) }
@@ -1614,6 +1743,7 @@ private fun SettingsModalSheet(
     var fastModelDraft by remember { mutableStateOf(orbCfg.fastModel) }
     var deepModelDraft by remember { mutableStateOf(orbCfg.deepAudioModel) }
     var livePolishDraft by remember { mutableStateOf(orbCfg.livePolishEnabled) }
+    var autoTranslateDraft by remember { mutableStateOf(orbCfg.autoTranslateTarget) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1734,6 +1864,37 @@ private fun SettingsModalSheet(
                 Text("Live rolling autocorrect while recording", style = MaterialTheme.typography.bodySmall, color = OrbFgStrong)
                 Switch(checked = livePolishDraft, onCheckedChange = { livePolishDraft = it })
             }
+            Text(
+                text = "AUTO-TRANSLATE TARGET (RECORD MODE)",
+                fontSize = 11.sp,
+                letterSpacing = 0.8.sp,
+                color = OrbFgSubtle
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val options = listOf("" to "Off") + OrbRouterConfig.SUPPORTED_LANGUAGES.take(4).map { it to it.take(2).uppercase() }
+                options.forEach { (value, shortLabel) ->
+                    val selected = autoTranslateDraft.equals(value, ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) OrbBlue.copy(alpha = 0.22f) else OrbBg)
+                            .border(1.dp, if (selected) OrbBlue else OrbBorder, RoundedCornerShape(8.dp))
+                            .clickable { autoTranslateDraft = value }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = shortLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) OrbBlue else OrbFgMuted
+                        )
+                    }
+                }
+            }
 
             HorizontalDivider(color = OrbBorder)
             Text(
@@ -1766,7 +1927,10 @@ private fun SettingsModalSheet(
                             apiKey = orbKeyDraft,
                             fastModel = fastModelDraft,
                             deepAudioModel = deepModelDraft,
-                            livePolishEnabled = livePolishDraft
+                            livePolishEnabled = livePolishDraft,
+                            autoTranslateTarget = autoTranslateDraft,
+                            translateLangA = orbCfg.translateLangA,
+                            translateLangB = orbCfg.translateLangB
                         )
                     )
                 },

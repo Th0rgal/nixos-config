@@ -16,7 +16,8 @@ data class TranscriptSegment(
     val speakerName: String,
     val startMs: Long,
     val endMs: Long,
-    val text: String
+    val text: String,
+    val translatedText: String = ""
 )
 
 data class VoiceNote(
@@ -100,6 +101,7 @@ object VoiceNoteStore {
                     put("start_ms", s.startMs)
                     put("end_ms", s.endMs)
                     put("text", s.text)
+                    if (s.translatedText.isNotBlank()) put("translated_text", s.translatedText)
                 })
             }
             put("segments", segs)
@@ -163,6 +165,9 @@ object VoiceNoteStore {
             for (seg in note.segments) {
                 val ts = formatTimestamp(seg.startMs)
                 sb.appendLine("**[$ts] ${seg.speakerName}:** ${seg.text}")
+                if (seg.translatedText.isNotBlank()) {
+                    sb.appendLine("  *→ ${seg.translatedText}*")
+                }
                 sb.appendLine()
             }
         }
@@ -188,7 +193,8 @@ object VoiceNoteStore {
                             speakerName = s.optString("speaker_name", "Speaker 1"),
                             startMs = s.optLong("start_ms", 0L),
                             endMs = s.optLong("end_ms", 0L),
-                            text = s.optString("text", "")
+                            text = s.optString("text", ""),
+                            translatedText = if (s.isNull("translated_text")) "" else s.optString("translated_text", "")
                         )
                     )
                 }

@@ -47,6 +47,7 @@ import kotlin.math.sqrt
 data class RecorderState(
     val isRecording: Boolean = false,
     val isProcessing: Boolean = false,
+    val isTranslateMode: Boolean = false,
     val statusMessage: String = "Ready",
     val elapsedMs: Long = 0L,
     val levels: List<Float> = emptyList(),
@@ -74,6 +75,9 @@ class VoiceRecorderService : Service() {
     companion object {
         const val ACTION_START = "com.th0rgal.orbvoice.START"
         const val ACTION_STOP = "com.th0rgal.orbvoice.STOP"
+        const val EXTRA_TRANSLATE_MODE = "translate_mode"
+        const val EXTRA_LANG_A = "lang_a"
+        const val EXTRA_LANG_B = "lang_b"
         private const val CHANNEL_ID = "orb_voice_recorder"
         private const val NOTIF_ID = 7901
         private const val SAMPLE_RATE = 16000
@@ -81,8 +85,17 @@ class VoiceRecorderService : Service() {
         private val _state = MutableStateFlow(RecorderState())
         val state: StateFlow<RecorderState> = _state
 
-        fun startRecording(context: Context) {
-            val intent = Intent(context, VoiceRecorderService::class.java).setAction(ACTION_START)
+        fun startRecording(
+            context: Context,
+            translateMode: Boolean = false,
+            langA: String = "English",
+            langB: String = "French"
+        ) {
+            val intent = Intent(context, VoiceRecorderService::class.java)
+                .setAction(ACTION_START)
+                .putExtra(EXTRA_TRANSLATE_MODE, translateMode)
+                .putExtra(EXTRA_LANG_A, langA)
+                .putExtra(EXTRA_LANG_B, langB)
             ContextCompat.startForegroundService(context, intent)
         }
 
@@ -154,6 +167,9 @@ class VoiceRecorderService : Service() {
     @Volatile private var currentTurnStartMs: Long = 0L
     @Volatile private var currentElapsedMs: Long = 0L
     @Volatile private var currentSpeakerIndex: Int = 0
+    @Volatile private var translateModeActive: Boolean = false
+    @Volatile private var translateLangA: String = "English"
+    @Volatile private var translateLangB: String = "French"
     private val ringLock = Any()
     private val recentRing = ShortArray(SAMPLE_RATE * 3) // 3s rolling window for exact per-utterance speaker ID
     private var ringWritePos = 0
@@ -187,7 +203,12 @@ class VoiceRecorderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> beginCapture()
+            ACTION_START -> {
+                translateModeActive = intent.getBooleanExtra(EXTRA_TRANSLATE_MODE, false)
+                translateLangA = intent.getStringExtra(EXTRA_LANG_A) ?: "English"
+                translateLangB = intent.getStringExtra(EXTRA_LANG_B) ?: "French"
+                beginCapture()
+            }
             ACTION_STOP -> stopCapture()
         }
         return START_NOT_STICKY
@@ -212,13 +233,17 @@ class VoiceRecorderService : Service() {
             return
         }
 
-        startForegroundCompat("Listening — live multi-speaker stream active")
+        startForegroundCompat(
+            if (translateModeActive) "Scribe Translate · $translateLangA ⇄ $translateLangB"
+            else "Scribe · live multi-speaker stream active"
+        )
         acquireWakeLock()
         latestRecognizedText = ""
         _state.value = RecorderState(
             isRecording = true,
             isProcessing = false,
-            statusMessage = "Listening · live voice separation",
+            isTranslateMode = translateModeActive,
+            statusMessage = if (translateModeActive) "$translateLangA ⇄ $translateLangB" else "Listening · live voice separation",
             elapsedMs = 0L,
             levels = emptyList(),
             liveSegments = emptyList(),
@@ -554,23 +579,33 @@ class VoiceRecorderService : Service() {
                     partialText = "",
                     liveSegments = updatedList
                 )
-                // A) Rolling live Orb Router autocorrect (builtin/fast) on dedicated thread so ASR never stalls
+                // A) Rolling live Orb Router autocorrect + auto-translate / bidirectional translate on dedicated thread
                 val orbCfg = OrbRouterConfig.load(this)
-                if (orbCfg.isConfigured && orbCfg.livePolishEnabled && text.length >= 6) {
+                val shouldRunLlm = orbCfg.isConfigured &&
+                    (translateModeActive || orbCfg.autoTranslateTarget.isNotBlank() || orbCfg.livePolishEnabled) &&
+                    text.length >= 2
+                if (shouldRunLlm) {
                     val ctxSnap = updatedList.dropLast(1).takeLast(3)
                     val namesSnap = cur.speakerNames.values.toList()
+                    val bidirA = if (translateModeActive) translateLangA else null
+                    val bidirB = if (translateModeActive) translateLangB else null
                     llmExecutor.execute {
-                        val polished = OrbRouterClient.polishLiveSegment(
+                        val res = OrbRouterClient.polishAndTranslateLive(
                             cfg = orbCfg,
                             rawText = text,
                             recentContext = ctxSnap,
-                            knownSpeakers = namesSnap
+                            knownSpeakers = namesSnap,
+                            bidirectionalLangA = bidirA,
+                            bidirectionalLangB = bidirB
                         )
-                        if (!polished.isNullOrBlank() && polished != text) {
+                        if (res != null && (res.cleaned != text || res.translated.isNotBlank())) {
                             val nowState = _state.value
                             if (targetIndex < nowState.liveSegments.size && nowState.liveSegments[targetIndex].text == text) {
                                 val copy = nowState.liveSegments.toMutableList()
-                                copy[targetIndex] = copy[targetIndex].copy(text = polished)
+                                copy[targetIndex] = copy[targetIndex].copy(
+                                    text = res.cleaned,
+                                    translatedText = res.translated
+                                )
                                 _state.value = nowState.copy(liveSegments = copy)
                             }
                         }
