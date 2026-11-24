@@ -156,7 +156,7 @@ class VoiceRecorderService : Service() {
     private var pipeWriterThread: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val asrExecutor = Executors.newSingleThreadExecutor()
-    private val llmExecutor = Executors.newSingleThreadExecutor()
+    private val llmExecutor = Executors.newFixedThreadPool(3)
     private var speechRecognizer: SpeechRecognizer? = null
     private val pipeLock = Any()
     private var pipeWriteFd: ParcelFileDescriptor? = null
@@ -570,7 +570,8 @@ class VoiceRecorderService : Service() {
                     speakerName = spkName,
                     startMs = tStart,
                     endMs = tEnd,
-                    text = text
+                    text = text,
+                    translatedText = if (translateModeActive) "Translating…" else ""
                 )
                 val updatedList = cur.liveSegments + newSeg
                 val targetIndex = updatedList.lastIndex
@@ -579,7 +580,7 @@ class VoiceRecorderService : Service() {
                     partialText = "",
                     liveSegments = updatedList
                 )
-                // A) Rolling live Orb Router autocorrect + auto-translate / bidirectional translate on dedicated thread
+                // A) Rolling live Orb Router autocorrect + auto-translate / bidirectional translate in parallel
                 val orbCfg = OrbRouterConfig.load(this)
                 val shouldRunLlm = orbCfg.isConfigured &&
                     (translateModeActive || orbCfg.autoTranslateTarget.isNotBlank() || orbCfg.livePolishEnabled) &&
@@ -590,7 +591,7 @@ class VoiceRecorderService : Service() {
                     val bidirA = if (translateModeActive) translateLangA else null
                     val bidirB = if (translateModeActive) translateLangB else null
                     llmExecutor.execute {
-                        val res = OrbRouterClient.polishAndTranslateLive(
+                        var res = OrbRouterClient.polishAndTranslateLive(
                             cfg = orbCfg,
                             rawText = text,
                             recentContext = ctxSnap,
@@ -598,16 +599,30 @@ class VoiceRecorderService : Service() {
                             bidirectionalLangA = bidirA,
                             bidirectionalLangB = bidirB
                         )
-                        if (res != null && (res.cleaned != text || res.translated.isNotBlank())) {
-                            val nowState = _state.value
-                            if (targetIndex < nowState.liveSegments.size && nowState.liveSegments[targetIndex].text == text) {
-                                val copy = nowState.liveSegments.toMutableList()
-                                copy[targetIndex] = copy[targetIndex].copy(
+                        // One quick retry if bidirectional translation came back empty
+                        if (translateModeActive && (res == null || res.translated.isBlank())) {
+                            res = OrbRouterClient.polishAndTranslateLive(
+                                cfg = orbCfg,
+                                rawText = text,
+                                recentContext = emptyList(),
+                                knownSpeakers = namesSnap,
+                                bidirectionalLangA = bidirA,
+                                bidirectionalLangB = bidirB
+                            )
+                        }
+                        val nowState = _state.value
+                        if (targetIndex < nowState.liveSegments.size) {
+                            val copy = nowState.liveSegments.toMutableList()
+                            val existingSeg = copy[targetIndex]
+                            if (res != null) {
+                                copy[targetIndex] = existingSeg.copy(
                                     text = res.cleaned,
                                     translatedText = res.translated
                                 )
-                                _state.value = nowState.copy(liveSegments = copy)
+                            } else if (existingSeg.translatedText == "Translating…") {
+                                copy[targetIndex] = existingSeg.copy(translatedText = "")
                             }
+                            _state.value = nowState.copy(liveSegments = copy)
                         }
                     }
                 }

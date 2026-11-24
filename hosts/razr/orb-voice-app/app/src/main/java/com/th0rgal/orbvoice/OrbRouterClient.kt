@@ -112,10 +112,13 @@ object OrbRouterClient {
         val systemPrompt = buildString {
             append("You are an ultra-fast live speech autocorrector and interpreter. ")
             if (isBidir) {
-                append("Speakers are conversing in $bidirectionalLangA and $bidirectionalLangB. ")
+                append("Speakers are conversing between $bidirectionalLangA and $bidirectionalLangB. ")
                 append("1) Fix ASR typos/punctuation in the spoken utterance in its original language (\"cleaned\"). ")
-                append("2) If spoken in $bidirectionalLangA, translate naturally into $bidirectionalLangB; if spoken in $bidirectionalLangB, translate naturally into $bidirectionalLangA (\"translated\"). ")
-                append("If spoken in another language, translate into $bidirectionalLangA. ")
+                append("2) Detect the language of ONLY the latest spoken line (ignore the language of prior context). ")
+                append("If the latest line is in $bidirectionalLangA, translate it naturally into $bidirectionalLangB. ")
+                append("If the latest line is in $bidirectionalLangB, translate it naturally into $bidirectionalLangA. ")
+                append("Otherwise translate into $bidirectionalLangA. ")
+                append("\"translated\" MUST NEVER be empty and MUST be in the opposite language from \"cleaned\". ")
             } else {
                 append("1) Fix ASR typos/punctuation in the spoken utterance in its original language (\"cleaned\"). ")
                 append("2) Translate it naturally into $targetLang (\"translated\"). If it is already in $targetLang, set \"translated\" to \"\". ")
@@ -125,11 +128,11 @@ object OrbRouterClient {
         }
         val userPrompt = buildString {
             if (ctxLines.isNotBlank()) {
-                append("Recent context:\n")
+                append("Background context (for terminology only, do NOT translate this):\n")
                 append(ctxLines)
                 append("\n\n")
             }
-            append("Latest spoken line:\n")
+            append("Latest spoken line to clean & translate:\n")
             append(rawText)
         }
         return try {
@@ -139,14 +142,15 @@ object OrbRouterClient {
                 systemPrompt = systemPrompt,
                 userContent = userPrompt,
                 maxTokens = 320,
-                timeoutMs = 8000
+                timeoutMs = 10000
             ) ?: return null
             val json = extractJsonObject(raw) ?: return null
             val cleaned = safeOptString(json, "cleaned", rawText).ifEmpty { rawText }
             val translated = safeOptString(json, "translated", "")
+            Log.d("OrbVoice", "LiveTranslate [$bidirectionalLangA<->$bidirectionalLangB]: '$rawText' -> '$translated'")
             LivePolishResult(cleaned = cleaned, translated = translated)
         } catch (e: Exception) {
-            Log.d("OrbVoice", "Live translate skipped: ${e.message}")
+            Log.w("OrbVoice", "Live translate failed: ${e.message}")
             null
         }
     }
