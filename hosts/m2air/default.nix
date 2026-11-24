@@ -81,6 +81,7 @@ in
       "wheel"
       "video"
       "render"
+      "accel"
       "audio"
       "input"
       "networkmanager"

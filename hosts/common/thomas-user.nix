@@ -32,6 +32,7 @@ let
     text = ''
       flake="''${REBUILD_FLAKE:-${workDir}/nixos-config}"
       omarchnix="''${REBUILD_OMARCHNIX:-${workDir}/omarchnix}"
+      folio="''${REBUILD_FOLIO:-/home/${user.username}/work/folio}"
       verb=switch
       locked=0
       bump_orb=0
@@ -65,6 +66,10 @@ let
         fi
         echo "rebuild: using local omarchnix at $omarchnix ($(git -C "$omarchnix" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$omarchnix" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
         overrides=(--override-input omarchnix "path:$omarchnix" --no-write-lock-file)
+        if [ -f "$folio/flake.nix" ]; then
+          echo "rebuild: using local folio at $folio ($(git -C "$folio" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$folio" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
+          overrides+=(--override-input omarchnix/folio "path:$folio")
+        fi
         if [ "$bump_orb" = 0 ]; then
           orb_ref=$(git ls-remote --exit-code https://github.com/Th0rgal/orb.git refs/heads/master)
           read -r orb_rev _ <<<"$orb_ref"

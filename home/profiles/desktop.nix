@@ -34,6 +34,16 @@ in
 
   home.activation.ensureFolioNotesDir = config.lib.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/Notes"
+    # Remove any stale local desktop override from manual dev builds that shadows
+    # the Nix-managed folio.desktop in Spotlight/XDG launchers.
+    if [ -L "$HOME/.local/share/folio-app" ] && [ ! -e "$HOME/.local/share/folio-app" ]; then
+      rm -f "$HOME/.local/share/folio-app"
+    fi
+    if [ -f "$HOME/.local/share/applications/folio.desktop" ] \
+      && ${pkgs.gnugrep}/bin/grep -q "$HOME/.local/share/folio-app" "$HOME/.local/share/applications/folio.desktop" \
+      && [ ! -x "$HOME/.local/share/folio-app/bin/folio" ]; then
+      rm -f "$HOME/.local/share/applications/folio.desktop"
+    fi
   '';
 
   # Seed `~/Pictures/Wallpapers/*.webp` from `inputs.wallpapers` on fresh VMs/workstations,

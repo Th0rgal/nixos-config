@@ -50,6 +50,9 @@
   boot.initrd.luks.devices.cryptroot = {
     device = "/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9";
     allowDiscards = true;
+    # Execute ARMv8 hardware AES-XTS inline on the submitting CPU instead of
+    # bouncing 4 KiB NVMe I/O across unbound kcryptd workqueues.
+    bypassWorkqueues = true;
   };
 
   fileSystems."/" = {
