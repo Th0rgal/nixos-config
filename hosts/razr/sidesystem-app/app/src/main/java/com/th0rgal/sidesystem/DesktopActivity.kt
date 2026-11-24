@@ -53,6 +53,7 @@ import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -140,6 +141,7 @@ class DesktopActivity : ComponentActivity() {
     private var stickyAlt by mutableStateOf(false)
     private var stickySuper by mutableStateOf(false)
     private var resPriority by mutableStateOf("phone") // "phone" | "mac" | "auto"
+    private var phoneScale by mutableStateOf("1.5")  // "1.0" | "1.25" | "1.5" | "2.0"
     private var themeMode by mutableStateOf(ThemeMode.SYSTEM)
     private var vncPort: Int = 5900
     private var cutoutRect by mutableStateOf<Rect?>(null)
@@ -155,6 +157,8 @@ class DesktopActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         vncPort = intent?.getIntExtra(EXTRA_PORT, 5900) ?: 5900
         themeMode = ThemeMode.fromKey(intent?.getStringExtra(EXTRA_THEME_MODE))
+        phoneScale = getSharedPreferences("sidesystem_prefs", Context.MODE_PRIVATE)
+            .getString("phone_scale", "1.5") ?: "1.5"
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.attributes = window.attributes.apply {
@@ -261,13 +265,26 @@ class DesktopActivity : ComponentActivity() {
         }
     }
 
+    private fun cyclePhoneScale() {
+        val next = when (phoneScale) {
+            "1.0" -> "1.25"
+            "1.25" -> "1.5"
+            "1.5" -> "2.0"
+            else -> "1.0"
+        }
+        phoneScale = next
+        getSharedPreferences("sidesystem_prefs", Context.MODE_PRIVATE)
+            .edit().putString("phone_scale", next).apply()
+        syncResolutionToCurrentScreen()
+    }
+
     private fun syncResolutionToCurrentScreen() {
         val bounds = windowManager.currentWindowMetrics.bounds
         val physW = bounds.width().coerceAtLeast(320)
         val physH = bounds.height().coerceAtLeast(320)
 
-        // Pick an exact-aspect-ratio crisp resolution (~1.85M px) with dimensions divisible by 8
-        // and Hyprland-valid scale (1.0 or 1.25) so Hyprland never emits an invalid-scale warning.
+        // Pick an exact-aspect-ratio crisp resolution (~1.85M px) with dimensions divisible by 60
+        // so ALL four scales (1.0, 1.25, 1.5, 2.0) divide to exact integers with 0 Hyprland warnings.
         val maxPixels = 1_850_000.0
         val currentPixels = physW.toDouble() * physH.toDouble()
         val downscale = if (currentPixels > maxPixels) {
@@ -275,10 +292,9 @@ class DesktopActivity : ComponentActivity() {
         } else {
             1.0
         }
-        val targetW = ((physW / downscale).roundToInt() / 8) * 8
-        val targetH = ((physH / downscale).roundToInt() / 8) * 8
-        val minDim = minOf(targetW, targetH)
-        val hyprScale = if (minDim <= 960) "1.0" else "1.25"
+        val targetW = (((physW / downscale).roundToInt() + 30) / 60) * 60
+        val targetH = (((physH / downscale).roundToInt() + 30) / 60) * 60
+        val hyprScale = phoneScale
 
         scope.launch {
             val d = '$'
@@ -572,6 +588,9 @@ class DesktopActivity : ComponentActivity() {
                                 },
                                 resPriority == "phone"
                             ) { cycleResPriority() }
+                            OverlayRailButton(Icons.Rounded.ZoomIn, "${phoneScale}x", phoneScale != "1.0") {
+                                cyclePhoneScale()
+                            }
                             OverlayRailButton(Icons.Rounded.Refresh, "Fit", false) {
                                 syncResolutionToCurrentScreen()
                                 rfb?.requestFullRefresh()
