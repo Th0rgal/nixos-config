@@ -1834,6 +1834,10 @@ private fun TelemetryGraphCard(
 
             Spacer(modifier = Modifier.height(if (compact) 6.dp else 10.dp))
 
+            val chartBorder = OrbBorder
+            val chartGreen = OrbGreen
+            val chartAmber = OrbAmber
+            val chartBlue = OrbBlue
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1844,7 +1848,7 @@ private fun TelemetryGraphCard(
                 for (frac in gridLines) {
                     val y = size.height * frac
                     drawLine(
-                        color = OrbBorder.copy(alpha = 0.7f),
+                        color = chartBorder.copy(alpha = 0.7f),
                         start = Offset(0f, y),
                         end = Offset(size.width, y),
                         strokeWidth = 1.dp.toPx(),
@@ -1859,21 +1863,21 @@ private fun TelemetryGraphCard(
                 drawSmoothAreaSeries(
                     values = ramPoints,
                     maxSlots = 36,
-                    color = OrbGreen,
+                    color = chartGreen,
                     fillAlpha = 0.14f,
                     strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
                 )
                 drawSmoothAreaSeries(
                     values = gpuPoints,
                     maxSlots = 36,
-                    color = OrbAmber,
+                    color = chartAmber,
                     fillAlpha = 0.18f,
                     strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
                 )
                 drawSmoothAreaSeries(
                     values = cpuPoints,
                     maxSlots = 36,
-                    color = OrbBlue,
+                    color = chartBlue,
                     fillAlpha = 0.22f,
                     strokeWidthPx = (if (compact) 1.5f else 1.75f).dp.toPx()
                 )
@@ -2333,6 +2337,10 @@ private fun TelemetryExpandedOverlay(
                             }
                         }
 
+                        val fullBorder = OrbBorder
+                        val fullGreen = OrbGreen
+                        val fullAmber = OrbAmber
+                        val fullBlue = OrbBlue
                         Canvas(
                             modifier = Modifier
                                 .weight(1f)
@@ -2343,7 +2351,7 @@ private fun TelemetryExpandedOverlay(
                             for (frac in gridFracs) {
                                 val y = 4.dp.toPx() + (size.height - 6.dp.toPx()) * frac
                                 drawLine(
-                                    color = OrbBorder.copy(alpha = if (frac == 0.5f) 0.9f else 0.55f),
+                                    color = fullBorder.copy(alpha = if (frac == 0.5f) 0.9f else 0.55f),
                                     start = Offset(0f, y),
                                     end = Offset(size.width, y),
                                     strokeWidth = 1.dp.toPx(),
@@ -2355,7 +2363,7 @@ private fun TelemetryExpandedOverlay(
                                 drawSmoothAreaSeries(
                                     values = samples.map { it.memPct.coerceIn(0, 100) / 100f },
                                     maxSlots = 60,
-                                    color = OrbGreen,
+                                    color = fullGreen,
                                     fillAlpha = 0.16f,
                                     strokeWidthPx = 2.dp.toPx()
                                 )
@@ -2364,7 +2372,7 @@ private fun TelemetryExpandedOverlay(
                                 drawSmoothAreaSeries(
                                     values = samples.map { it.gpuPct.coerceIn(0, 100) / 100f },
                                     maxSlots = 60,
-                                    color = OrbAmber,
+                                    color = fullAmber,
                                     fillAlpha = 0.22f,
                                     strokeWidthPx = 2.dp.toPx()
                                 )
@@ -2373,7 +2381,7 @@ private fun TelemetryExpandedOverlay(
                                 drawSmoothAreaSeries(
                                     values = samples.map { it.cpuPct.coerceIn(0, 100) / 100f },
                                     maxSlots = 60,
-                                    color = OrbBlue,
+                                    color = fullBlue,
                                     fillAlpha = 0.26f,
                                     strokeWidthPx = 2.dp.toPx()
                                 )

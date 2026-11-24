@@ -18,8 +18,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +49,16 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            SideSystemTheme {
+            val useDark = isSystemInDarkTheme()
+            SideEffect {
+                enableEdgeToEdge(
+                    statusBarStyle = if (useDark) SystemBarStyle.dark(Color.TRANSPARENT)
+                        else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+                    navigationBarStyle = if (useDark) SystemBarStyle.dark(Color.TRANSPARENT)
+                        else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                )
+            }
+            SideSystemTheme(themeMode = ThemeMode.SYSTEM) {
                 val context = LocalContext.current
                 val lifecycleOwner = LocalLifecycleOwner.current
                 val scope = rememberCoroutineScope()
@@ -171,15 +182,11 @@ class MainActivity : ComponentActivity() {
                                         showNotice("Desktop start failed: ${res.combinedError}")
                                         return@launch
                                     }
-                                    val launched = launchVncViewer(context, status.vncPort)
-                                    if (!launched) {
-                                        Toast.makeText(
-                                            context,
-                                            "No VNC viewer installed — install AVNC (com.gaurav.avnc)",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                        showNotice("Install AVNC to open vnc://127.0.0.1:${status.vncPort}")
+                                    val desktopIntent = Intent(context, DesktopActivity::class.java).apply {
+                                        putExtra(DesktopActivity.EXTRA_PORT, status.vncPort)
+                                        putExtra(DesktopActivity.EXTRA_THEME_MODE, ThemeMode.SYSTEM.key)
                                     }
+                                    context.startActivity(desktopIntent)
                                 } finally {
                                     busyAction = null
                                 }

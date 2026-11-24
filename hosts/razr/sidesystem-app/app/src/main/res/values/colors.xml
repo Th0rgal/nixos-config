@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="orb_bg">#141414</color>
-    <color name="orb_surface">#181818</color>
-    <color name="orb_fg_strong">#F4F4F5</color>
+    <color name="orb_bg">#F5F6F8</color>
+    <color name="orb_surface">#FFFFFF</color>
+    <color name="orb_fg">#111318</color>
 </resources>
