@@ -16,10 +16,9 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +27,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,12 +46,14 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DesktopWindows
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -140,6 +142,14 @@ class DesktopActivity : ComponentActivity() {
     private var resPriority by mutableStateOf("phone") // "phone" | "mac" | "auto"
     private var themeMode by mutableStateOf(ThemeMode.SYSTEM)
     private var vncPort: Int = 5900
+    private var cutoutRect by mutableStateOf<Rect?>(null)
+    private var screenBounds by mutableStateOf(Rect(0, 0, 2992, 1224))
+
+    private fun refreshCutoutMetrics() {
+        val metrics = windowManager.currentWindowMetrics
+        screenBounds = metrics.bounds
+        cutoutRect = metrics.windowInsets.displayCutout?.boundingRects?.firstOrNull()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -153,6 +163,7 @@ class DesktopActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
+        refreshCutoutMetrics()
 
         loadResPriorityAndMaybeSync()
 
@@ -182,6 +193,7 @@ class DesktopActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         hideSystemBars()
+        refreshCutoutMetrics()
         if (resPriority != "mac") {
             syncResolutionToCurrentScreen()
         }
@@ -441,96 +453,176 @@ class DesktopActivity : ComponentActivity() {
                 }
             }
 
-            // 4. Right-edge collapsible side overlay (Keyboard, Hand-as-Mouse, Res Priority, Fit, Close)
+            // 4. Dynamic-Island Camera-Hugging Overlay Pill (wraps the physical camera cutout!)
+            val density = LocalDensity.current
+            val cRect = cutoutRect
+            val sBounds = screenBounds
+            val isTopCutout = cRect != null && cRect.top <= 12 && cRect.width() < sBounds.width() / 2
+            val isLeftCutout = cRect != null && !isTopCutout && cRect.left <= 12
+            val isRightCutout = cRect != null && !isTopCutout && !isLeftCutout && cRect.right >= sBounds.width() - 12
+
+            val islandBg = Color(0xFF000000)
+            val islandBorder = Color.White.copy(alpha = 0.14f)
+            val cutoutWdp = with(density) { (cRect?.width() ?: 120).toDp() }
+            val cutoutHdp = with(density) { (cRect?.height() ?: 110).toDp() }
+
+            val islandAlignment = when {
+                isTopCutout -> Alignment.TopCenter
+                isLeftCutout -> Alignment.CenterStart
+                else -> Alignment.CenterEnd
+            }
+
             Box(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp)
+                    .align(islandAlignment)
+                    .padding(
+                        top = if (isTopCutout) 4.dp else 0.dp,
+                        start = if (isLeftCutout) 4.dp else 0.dp,
+                        end = if (isRightCutout || (!isTopCutout && !isLeftCutout)) 4.dp else 0.dp
+                    )
             ) {
-                if (!overlayExpanded) {
-                    Surface(
-                        shape = RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp, topEnd = 6.dp, bottomEnd = 6.dp),
-                        color = pillBg,
-                        border = BorderStroke(1.dp, pillBorder),
-                        modifier = Modifier
-                            .width(26.dp)
-                            .height(68.dp)
-                            .clickable { overlayExpanded = true }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.ChevronLeft,
-                                contentDescription = "Open controls",
-                                tint = OrbFgStrong,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = overlayExpanded,
-                    enter = fadeIn() + slideInHorizontally { it / 2 },
-                    exit = fadeOut() + slideOutHorizontally { it / 2 }
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = if (overlayExpanded) pillBg else islandBg,
+                    border = BorderStroke(1.dp, if (overlayExpanded) pillBorder else islandBorder),
+                    modifier = Modifier.animateContentSize()
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = pillBg,
-                        border = BorderStroke(1.dp, pillBorder)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                    if (!overlayExpanded) {
+                        if (isTopCutout) {
+                            // Portrait top-center Dynamic Island wrapping the punch-hole lens
+                            Row(
+                                modifier = Modifier
+                                    .clickable { overlayExpanded = true }
+                                    .height(cutoutHdp.coerceAtLeast(34.dp))
+                                    .padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Spacer(modifier = Modifier.width(cutoutWdp.coerceAtLeast(34.dp)))
+                                Icon(
+                                    imageVector = Icons.Rounded.ExpandMore,
+                                    contentDescription = "Open controls",
+                                    tint = Color.White.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else if (isLeftCutout) {
+                            // Landscape-left Dynamic Island wrapping the left camera punch-hole
+                            Row(
+                                modifier = Modifier
+                                    .clickable { overlayExpanded = true }
+                                    .height(cutoutHdp.coerceAtLeast(38.dp))
+                                    .width((cutoutWdp + 22.dp).coerceAtLeast(58.dp))
+                                    .padding(end = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ChevronRight,
+                                    contentDescription = "Open controls",
+                                    tint = Color.White.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
+                            // Landscape-right Dynamic Island wrapping the right camera punch-hole
+                            Row(
+                                modifier = Modifier
+                                    .clickable { overlayExpanded = true }
+                                    .height(cutoutHdp.coerceAtLeast(38.dp))
+                                    .width((cutoutWdp + 22.dp).coerceAtLeast(58.dp))
+                                    .padding(start = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ChevronLeft,
+                                    contentDescription = "Open controls",
+                                    tint = Color.White.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    } else if (isTopCutout) {
+                        // Expanded horizontal rail for portrait top camera
+                        Row(
+                            modifier = Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            OverlayRailButton(Icons.Rounded.ExpandMore, "Hide", false) { overlayExpanded = false }
+                            OverlayRailButton(Icons.Rounded.Keyboard, "Keys", keyboardVisible) { keyboardVisible = !keyboardVisible }
                             OverlayRailButton(
-                                icon = Icons.Rounded.ChevronRight,
-                                label = "Hide",
-                                active = false,
-                                onClick = { overlayExpanded = false }
-                            )
+                                if (handMouseEnabled) Icons.Rounded.Mouse else Icons.Rounded.TouchApp,
+                                if (handMouseEnabled) "Mouse" else "Touch",
+                                handMouseEnabled
+                            ) { handMouseEnabled = !handMouseEnabled }
                             OverlayRailButton(
-                                icon = Icons.Rounded.Keyboard,
-                                label = "Keys",
-                                active = keyboardVisible,
-                                onClick = { keyboardVisible = !keyboardVisible }
-                            )
-                            OverlayRailButton(
-                                icon = if (handMouseEnabled) Icons.Rounded.Mouse else Icons.Rounded.TouchApp,
-                                label = if (handMouseEnabled) "Mouse" else "Touch",
-                                active = handMouseEnabled,
-                                onClick = { handMouseEnabled = !handMouseEnabled }
-                            )
-                            OverlayRailButton(
-                                icon = when (resPriority) {
+                                when (resPriority) {
                                     "phone" -> Icons.Rounded.PhoneAndroid
                                     "mac" -> Icons.Rounded.DesktopWindows
                                     else -> Icons.Rounded.Sync
                                 },
-                                label = when (resPriority) {
+                                when (resPriority) {
                                     "phone" -> "Phone"
                                     "mac" -> "Mac"
                                     else -> "Auto"
                                 },
-                                active = resPriority == "phone",
-                                onClick = { cycleResPriority() }
+                                resPriority == "phone"
+                            ) { cycleResPriority() }
+                            OverlayRailButton(Icons.Rounded.Refresh, "Fit", false) {
+                                syncResolutionToCurrentScreen()
+                                rfb?.requestFullRefresh()
+                            }
+                            OverlayRailButton(Icons.Rounded.Close, "Exit", false, tintOverride = OrbRed) { finish() }
+                        }
+                    } else {
+                        // Expanded vertical rail shifted cleanly inward from the camera lens
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(
+                                start = if (isLeftCutout) (cutoutWdp - 4.dp).coerceAtLeast(0.dp) else 4.dp,
+                                end = if (isRightCutout) (cutoutWdp - 4.dp).coerceAtLeast(0.dp) else 4.dp,
+                                top = 6.dp,
+                                bottom = 6.dp
                             )
-                            OverlayRailButton(
-                                icon = Icons.Rounded.Refresh,
-                                label = "Fit",
-                                active = false,
-                                onClick = {
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                OverlayRailButton(
+                                    if (isLeftCutout) Icons.Rounded.ChevronLeft else Icons.Rounded.ChevronRight,
+                                    "Hide",
+                                    false
+                                ) { overlayExpanded = false }
+                                OverlayRailButton(Icons.Rounded.Keyboard, "Keys", keyboardVisible) { keyboardVisible = !keyboardVisible }
+                                OverlayRailButton(
+                                    if (handMouseEnabled) Icons.Rounded.Mouse else Icons.Rounded.TouchApp,
+                                    if (handMouseEnabled) "Mouse" else "Touch",
+                                    handMouseEnabled
+                                ) { handMouseEnabled = !handMouseEnabled }
+                                OverlayRailButton(
+                                    when (resPriority) {
+                                        "phone" -> Icons.Rounded.PhoneAndroid
+                                        "mac" -> Icons.Rounded.DesktopWindows
+                                        else -> Icons.Rounded.Sync
+                                    },
+                                    when (resPriority) {
+                                        "phone" -> "Phone"
+                                        "mac" -> "Mac"
+                                        else -> "Auto"
+                                    },
+                                    resPriority == "phone"
+                                ) { cycleResPriority() }
+                                OverlayRailButton(Icons.Rounded.Refresh, "Fit", false) {
                                     syncResolutionToCurrentScreen()
                                     rfb?.requestFullRefresh()
                                 }
-                            )
-                            OverlayRailButton(
-                                icon = Icons.Rounded.Close,
-                                label = "Exit",
-                                active = false,
-                                tintOverride = OrbRed,
-                                onClick = { finish() }
-                            )
+                                OverlayRailButton(Icons.Rounded.Close, "Exit", false, tintOverride = OrbRed) { finish() }
+                            }
                         }
                     }
                 }
