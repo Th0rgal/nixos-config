@@ -50,9 +50,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mouse
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -100,6 +103,7 @@ class DesktopActivity : ComponentActivity() {
     companion object {
         const val EXTRA_PORT = "vnc_port"
         const val EXTRA_THEME_MODE = "theme_mode"
+        private const val RES_OWNER_FILE = "/data/local/nixos/rootfs/var/lib/sidesystem/res-owner"
 
         private const val XK_BACKSPACE = 0xff08
         private const val XK_TAB = 0xff09
@@ -127,6 +131,7 @@ class DesktopActivity : ComponentActivity() {
     private var stickyCtrl by mutableStateOf(false)
     private var stickyAlt by mutableStateOf(false)
     private var stickySuper by mutableStateOf(false)
+    private var resPriority by mutableStateOf("phone") // "phone" | "mac" | "auto"
     private var themeMode by mutableStateOf(ThemeMode.SYSTEM)
     private var vncPort: Int = 5900
 
@@ -143,7 +148,7 @@ class DesktopActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
 
-        syncResolutionToCurrentScreen()
+        loadResPriorityAndMaybeSync()
 
         val client = RfbClient(
             host = "127.0.0.1",
@@ -171,7 +176,9 @@ class DesktopActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         hideSystemBars()
-        syncResolutionToCurrentScreen()
+        if (resPriority != "mac") {
+            syncResolutionToCurrentScreen()
+        }
     }
 
     override fun onDestroy() {
@@ -197,12 +204,51 @@ class DesktopActivity : ComponentActivity() {
         controller.hide(WindowInsetsCompat.Type.systemBars())
     }
 
+    private fun loadResPriorityAndMaybeSync() {
+        scope.launch {
+            val saved = try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $RES_OWNER_FILE 2>/dev/null || echo phone"))
+                val txt = p.inputStream.bufferedReader().readText().trim()
+                p.waitFor()
+                when (txt) {
+                    "phone", "mac", "auto" -> txt
+                    else -> "phone"
+                }
+            } catch (_: Exception) {
+                "phone"
+            }
+            runOnUiThread { resPriority = saved }
+            if (saved != "mac") {
+                syncResolutionToCurrentScreen()
+            }
+        }
+    }
+
+    private fun cycleResPriority() {
+        val next = when (resPriority) {
+            "phone" -> "mac"
+            "mac" -> "auto"
+            else -> "phone"
+        }
+        resPriority = next
+        scope.launch {
+            try {
+                Runtime.getRuntime().exec(
+                    arrayOf("su", "-c", "printf '%s\\n' '$next' > $RES_OWNER_FILE && chmod 666 $RES_OWNER_FILE")
+                ).waitFor()
+            } catch (_: Exception) {}
+            if (next == "phone") {
+                syncResolutionToCurrentScreen()
+            }
+        }
+    }
+
     private fun syncResolutionToCurrentScreen() {
         val bounds = windowManager.currentWindowMetrics.bounds
         val physW = bounds.width().coerceAtLeast(320)
         val physH = bounds.height().coerceAtLeast(320)
 
-        // Pick an exact-aspect-ratio crisp resolution (~1.5M–2.0M px) for 60fps efficiency & sharp text.
+        // Pick an exact-aspect-ratio crisp resolution (~1.85M px) for 60fps efficiency & sharp text.
         val maxPixels = 1_850_000.0
         val currentPixels = physW.toDouble() * physH.toDouble()
         val downscale = if (currentPixels > maxPixels) {
@@ -227,7 +273,7 @@ class DesktopActivity : ComponentActivity() {
                   SIG=${d}(ls "${d}XDG_RT/hypr/" 2>/dev/null | head -n1)
                   [ -n "${d}SIG" ] || exit 0
                   runuser -u thomas -- env XDG_RUNTIME_DIR="${d}XDG_RT" HYPRLAND_INSTANCE_SIGNATURE="${d}SIG" \
-                    /run/current-system/sw/bin/hyprctl keyword monitor "HEADLESS-1,${targetW}x${targetH}@60,0x0,${hyprScale}" >/dev/null 2>&1 || true
+                    /run/current-system/sw/bin/hyprctl eval "hl.monitor({ output = \"HEADLESS-1\", mode = \"${targetW}x${targetH}@60\", position = \"0x0\", scale = \"${hyprScale}\" })" >/dev/null 2>&1 || true
                 '
             """.trimIndent()
             try {
@@ -453,6 +499,20 @@ class DesktopActivity : ComponentActivity() {
                                     handMouseEnabled = !handMouseEnabled
                                     desktopView?.invalidateCursorOverlay()
                                 }
+                            )
+                            OverlayRailButton(
+                                icon = when (resPriority) {
+                                    "phone" -> Icons.Rounded.PhoneAndroid
+                                    "mac" -> Icons.Rounded.DesktopWindows
+                                    else -> Icons.Rounded.Sync
+                                },
+                                label = when (resPriority) {
+                                    "phone" -> "Phone"
+                                    "mac" -> "Mac"
+                                    else -> "Auto"
+                                },
+                                active = resPriority == "phone",
+                                onClick = { cycleResPriority() }
                             )
                             OverlayRailButton(
                                 icon = Icons.Rounded.Refresh,
