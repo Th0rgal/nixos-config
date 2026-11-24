@@ -864,6 +864,8 @@ EOF
 
     ensure_container_hw_bridge
     # Ensure Sunshine uinput -> Wayland input bridge is running (works completely cable-free!)
+    # Keep Android's normal soft keyboard enabled even while Sunshine's virtual uinput keyboard exists.
+    settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
     if [ -x "${BASE_DIR}/bin/bt-hid-bridge" ]; then
         killall bt-hid-bridge 2>/dev/null || true
         sleep 0.2

@@ -287,10 +287,25 @@ class DesktopActivity : ComponentActivity() {
         val input = hiddenInput ?: return
         keyboardVisible = !keyboardVisible
         if (keyboardVisible) {
-            input.requestFocus()
-            imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            scope.launch {
+                try {
+                    Runtime.getRuntime().exec(
+                        arrayOf("su", "-c", "settings put secure show_ime_with_hard_keyboard 1")
+                    ).waitFor()
+                } catch (_: Exception) {}
+            }
+            input.post {
+                input.isFocusable = true
+                input.isFocusableInTouchMode = true
+                input.requestFocus()
+                WindowInsetsControllerCompat(window, input).show(WindowInsetsCompat.Type.ime())
+                @Suppress("DEPRECATION")
+                imm.showSoftInput(input, InputMethodManager.SHOW_FORCED)
+            }
         } else {
+            WindowInsetsControllerCompat(window, input).hide(WindowInsetsCompat.Type.ime())
             imm.hideSoftInputFromWindow(input.windowToken, 0)
+            input.clearFocus()
             hideSystemBars()
         }
     }
@@ -376,15 +391,20 @@ class DesktopActivity : ComponentActivity() {
                 update = { it.invalidateCursorOverlay() }
             )
 
-            // 2. Invisible 1dp EditText to receive Android IME soft keyboard text
+            // 2. Invisible focusable EditText with sentinel space so Android soft keyboards
+            //    (Gboard, etc.) reliably open and deliver both Unicode text and Backspace.
             AndroidView(
                 modifier = Modifier.size(1.dp),
                 factory = { ctx ->
                     EditText(ctx).apply {
-                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
                         imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
+                        isFocusable = true
+                        isFocusableInTouchMode = true
                         alpha = 0f
                         isCursorVisible = false
+                        setText(" ")
+                        setSelection(1)
                         setOnKeyListener { _, keyCode, event ->
                             if (event.action == KeyEvent.ACTION_DOWN) {
                                 val ks = androidKeyToX11(keyCode, event)
@@ -400,13 +420,22 @@ class DesktopActivity : ComponentActivity() {
                             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                                 if (resetting || s == null) return
+                                if (s.isEmpty() && before > 0) {
+                                    sendKeyWithStickyModifiers(XK_BACKSPACE)
+                                    resetting = true
+                                    setText(" ")
+                                    setSelection(1)
+                                    resetting = false
+                                    return
+                                }
                                 if (count > 0) {
                                     val added = s.subSequence(start, start + count)
                                     for (ch in added) {
                                         sendKeyWithStickyModifiers(unicodeToX11Keysym(ch))
                                     }
                                     resetting = true
-                                    setText("")
+                                    setText(" ")
+                                    setSelection(1)
                                     resetting = false
                                 }
                             }
