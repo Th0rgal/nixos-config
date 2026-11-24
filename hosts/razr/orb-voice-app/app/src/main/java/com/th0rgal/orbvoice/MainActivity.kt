@@ -267,6 +267,9 @@ private fun OrbVoiceApp(
         reloadNotes()
         reloadKnownVoices()
     }
+    LaunchedEffect(activeTab) {
+        if (activeTab == VoiceTab.NOTES) reloadNotes()
+    }
     LaunchedEffect(recState.isRecording) {
         if (recState.isRecording) activeTab = VoiceTab.LIVE
     }
@@ -934,7 +937,7 @@ private fun TopOrbBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dotColor))
-            Text("Orb Voice", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
+            Text("Scribe", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
             StatusChip(npuStatus.badgeLabel, if (npuStatus.isReady) OrbGreen else OrbFgMuted)
         }
         Row(
@@ -1628,7 +1631,7 @@ private fun SettingsModalSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Orb Voice Settings", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
+            Text("Scribe Settings", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
             Text(
                 text = "Hardware: ${npuStatus.badgeLabel} · WeSpeaker ResNet293-LM · Parakeet-TDT-0.6B-v3",
                 style = MaterialTheme.typography.labelSmall,

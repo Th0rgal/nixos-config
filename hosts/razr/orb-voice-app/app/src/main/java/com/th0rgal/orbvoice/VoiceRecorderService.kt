@@ -464,7 +464,10 @@ class VoiceRecorderService : Service() {
             startOnDeviceSpeechRecognizer()
         }
 
-        val pcmBuffer = ByteArrayOutputStream(SAMPLE_RATE * 2 * 60)
+        val noteId = VoiceNoteStore.newNoteId()
+        val pcmFile = File(cacheDir, "$noteId.pcm")
+        val pcmOut = java.io.BufferedOutputStream(java.io.FileOutputStream(pcmFile), 32768)
+        var totalPcmBytes = 0L
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -591,7 +594,8 @@ class VoiceRecorderService : Service() {
                     sumSq += v * v
                 }
                 val bytesLen = read * 2
-                pcmBuffer.write(byteChunk, 0, bytesLen)
+                pcmOut.write(byteChunk, 0, bytesLen)
+                totalPcmBytes += bytesLen
                 appendToRing(chunk, read)
 
                 val rmsRaw = sqrt(sumSq / read).toFloat()
@@ -760,6 +764,7 @@ class VoiceRecorderService : Service() {
         } finally {
             try { recorder.stop() } catch (_: Exception) {}
             try { recorder.release() } catch (_: Exception) {}
+            try { pcmOut.flush(); pcmOut.close() } catch (_: Exception) {}
             // Flush any trailing Silero VAD speech segment before closing Parakeet-v3
             if (localAsr != null && localAsr.hasSileroVad) {
                 val trailing = localAsr.flushVad()
@@ -773,88 +778,67 @@ class VoiceRecorderService : Service() {
         }
 
         val durationMs = (System.currentTimeMillis() - startTimeMs).coerceAtLeast(100L)
-        val rawBytes = pcmBuffer.toByteArray()
-        val numSamples = rawBytes.size / 2
-        val pcmSamples = ShortArray(numSamples)
-        ByteBuffer.wrap(rawBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcmSamples)
-
         _state.value = _state.value.copy(
             isRecording = false,
             isProcessing = true,
             activeSpeakerIndex = null,
             partialText = "",
-            statusMessage = "Finalizing audio & transcript…"
+            statusMessage = "Saving note…"
         )
-        updateNotification("Finalizing note & saving to Documents/OrbVoice…")
+        updateNotification("Scribe: saving note to Documents/OrbVoice…")
 
         try {
             val dir = VoiceNoteStore.notesDir(this)
-            val noteId = VoiceNoteStore.newNoteId()
-            val wavTemp = File(cacheDir, "$noteId.wav")
-            wavTemp.writeBytes(NpuTranscriptionEngine.sliceToWavBytes(pcmSamples, 0, pcmSamples.size, SAMPLE_RATE))
 
-            val mp3File = File(dir, "$noteId.mp3")
-            val m4aFile = File(dir, "$noteId.m4a")
-            val finalAudioFile = if (encodeMp3ViaFfmpeg(wavTemp, mp3File)) {
-                mp3File
-            } else if (encodeM4aHardware(pcmSamples, m4aFile)) {
-                m4aFile
-            } else {
-                val wavFinal = File(dir, "$noteId.wav")
-                wavTemp.copyTo(wavFinal, overwrite = true)
-                wavFinal
-            }
-            wavTemp.delete()
-
-            // Wait briefly for any in-flight live ASR job to finish before closing engines
+            // Wait cleanly for queued ASR turns to finish and close native engines ON asrExecutor
+            // so JNI is never torn down mid-decode!
             val doneLatch = java.util.concurrent.CountDownLatch(1)
-            asrExecutor.execute { doneLatch.countDown() }
-            try { doneLatch.await(10, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
-            activeTracker = null
-            localAsr?.close()
-            neuralEngine?.close()
+            asrExecutor.execute {
+                activeTracker = null
+                localAsr?.close()
+                neuralEngine?.close()
+                doneLatch.countDown()
+            }
+            try { doneLatch.await(15, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
 
             val liveSegs = _state.value.liveSegments
             val speakerNames = _state.value.speakerNames
-            val (finalSegments, engineLabel) = if (liveSegs.isNotEmpty()) {
-                val named = liveSegs.map { seg ->
-                    seg.copy(speakerName = speakerNames[seg.speakerIndex] ?: seg.speakerName)
-                }
-                named to activeEngineTag
-            } else {
-                val (turns, dEngine) = SpeakerDiarizer.diarize(
-                    context = this,
-                    pcm = pcmSamples
-                )
-                val (segs, fullEng) = NpuTranscriptionEngine.transcribeTurns(
-                    context = this,
-                    pcm = pcmSamples,
-                    turns = turns,
-                    diarizerEngine = dEngine,
-                    sparkAsrUrl = sparkAsrUrl
-                )
-                segs.map { seg ->
-                    seg.copy(speakerName = speakerNames[seg.speakerIndex] ?: seg.speakerName)
-                } to fullEng
+            val finalSegments = liveSegs.map { seg ->
+                seg.copy(speakerName = speakerNames[seg.speakerIndex] ?: seg.speakerName)
             }
-
             val speakerCount = finalSegments.map { it.speakerIndex }.distinct().size.coerceAtLeast(1)
             val titleTime = SimpleDateFormat("MMM d · HH:mm", Locale.US).format(Date(startTimeMs))
+
+            // 1. Save WAV immediately by streaming pcmFile (zero OOM even on 2-hour recordings!)
+            val wavFile = File(dir, "$noteId.wav")
+            writeWavFromPcmFile(pcmFile, totalPcmBytes, wavFile)
+            pcmFile.delete()
+
+            // 2. Persist .md + .json IMMEDIATELY so stopping ALWAYS guarantees the note is saved!
             var note = VoiceNote(
                 id = noteId,
-                title = "Voice Note · $titleTime",
+                title = "Scribe Note · $titleTime",
                 createdAtMs = startTimeMs,
                 durationMs = durationMs,
-                audioPath = finalAudioFile.absolutePath,
+                audioPath = wavFile.absolutePath,
                 markdownPath = File(dir, "$noteId.md").absolutePath,
                 jsonPath = File(dir, "$noteId.json").absolutePath,
-                engineUsed = engineLabel,
+                engineUsed = activeEngineTag,
                 speakerCount = speakerCount,
                 syncedToSpark = false,
                 segments = finalSegments
             )
+            VoiceNoteStore.saveNote(this, note)
 
-            // B) Post-recording full-note polish + auto-title & summary via Orb Router (builtin/fast)
+            // 3. Best-effort compress WAV -> MP3 (if ffmpeg available) and update note audioPath
+            val mp3File = File(dir, "$noteId.mp3")
+            if (encodeMp3ViaFfmpeg(wavFile, mp3File)) {
+                wavFile.delete()
+                note = note.copy(audioPath = mp3File.absolutePath)
+                VoiceNoteStore.saveNote(this, note)
+            }
+
+            // 4. B) Post-recording full-note polish + auto-title & summary via Orb Router (builtin/fast)
             val orbCfg = OrbRouterConfig.load(this)
             if (orbCfg.isConfigured && note.segments.isNotEmpty()) {
                 _state.value = _state.value.copy(statusMessage = "Polishing transcript (${orbCfg.fastModel})…")
@@ -866,27 +850,64 @@ class VoiceRecorderService : Service() {
                         segments = polished.segments,
                         engineUsed = "${note.engineUsed} · ${orbCfg.fastModel}"
                     )
+                    VoiceNoteStore.saveNote(this, note)
                 }
             }
-            VoiceNoteStore.saveNote(this, note)
 
             _state.value = RecorderState(
                 isRecording = false,
                 isProcessing = false,
-                statusMessage = "Saved ${finalAudioFile.name} ($speakerCount voice${if (speakerCount > 1) "s" else ""})",
+                statusMessage = "Saved ${note.title} ($speakerCount voice${if (speakerCount > 1) "s" else ""})",
                 speakerNames = speakerNames,
                 lastCompletedNoteId = noteId
             )
         } catch (e: Exception) {
+            Log.e("OrbVoice", "Save error on stop", e)
             _state.value = _state.value.copy(
                 isRecording = false,
                 isProcessing = false,
                 statusMessage = "Save error: ${e.message}"
             )
         } finally {
+            pcmFile.delete()
             releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+        }
+    }
+
+    private fun writeWavFromPcmFile(pcmFile: File, pcmBytesLen: Long, wavOut: File) {
+        val dataSize = pcmBytesLen.coerceAtMost(Int.MAX_VALUE.toLong() - 44L).toInt()
+        val byteRate = SAMPLE_RATE * 2
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray())
+            putInt(36 + dataSize)
+            put("WAVE".toByteArray())
+            put("fmt ".toByteArray())
+            putInt(16)
+            putShort(1)
+            putShort(1)
+            putInt(SAMPLE_RATE)
+            putInt(byteRate)
+            putShort(2)
+            putShort(16)
+            put("data".toByteArray())
+            putInt(dataSize)
+        }.array()
+        java.io.BufferedOutputStream(java.io.FileOutputStream(wavOut), 65536).use { out ->
+            out.write(header)
+            if (pcmFile.exists()) {
+                pcmFile.inputStream().use { inp ->
+                    val buf = ByteArray(65536)
+                    var rem = dataSize
+                    while (rem > 0) {
+                        val r = inp.read(buf, 0, minOf(buf.size, rem))
+                        if (r <= 0) break
+                        out.write(buf, 0, r)
+                        rem -= r
+                    }
+                }
+            }
         }
     }
 
