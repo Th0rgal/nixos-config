@@ -1744,6 +1744,7 @@ private fun SettingsModalSheet(
     var deepModelDraft by remember { mutableStateOf(orbCfg.deepAudioModel) }
     var livePolishDraft by remember { mutableStateOf(orbCfg.livePolishEnabled) }
     var autoTranslateDraft by remember { mutableStateOf(orbCfg.autoTranslateTarget) }
+    var localAsrDraft by remember { mutableStateOf(orbCfg.localAsrModel) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1763,10 +1764,44 @@ private fun SettingsModalSheet(
         ) {
             Text("Scribe Settings", style = MaterialTheme.typography.titleMedium, color = OrbFgStrong)
             Text(
-                text = "Hardware: ${npuStatus.badgeLabel} · WeSpeaker ResNet293-LM · Parakeet-TDT-0.6B-v3",
+                text = "Hardware: ${npuStatus.badgeLabel} · WeSpeaker ResNet293-LM (12ms NPU)",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (npuStatus.isReady) OrbGreen else OrbFgMuted
             )
+            Text(
+                text = "LOCAL ASR ENGINE (ON-DEVICE)",
+                fontSize = 11.sp,
+                letterSpacing = 0.8.sp,
+                color = OrbFgSubtle
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nBest Accuracy",
+                    LocalAsrEngine.AsrModel.PARAKEET_V3.id to "Parakeet 0.6B\nUltra-Fast"
+                ).forEach { (id, label) ->
+                    val selected = localAsrDraft == id
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) OrbGreen.copy(alpha = 0.16f) else OrbBg)
+                            .border(1.dp, if (selected) OrbGreen else OrbBorder, RoundedCornerShape(8.dp))
+                            .clickable { localAsrDraft = id }
+                            .padding(vertical = 8.dp, horizontal = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) OrbGreen else OrbFgMuted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
             HorizontalDivider(color = OrbBorder)
 
             Text(
@@ -1930,7 +1965,8 @@ private fun SettingsModalSheet(
                             livePolishEnabled = livePolishDraft,
                             autoTranslateTarget = autoTranslateDraft,
                             translateLangA = orbCfg.translateLangA,
-                            translateLangB = orbCfg.translateLangB
+                            translateLangB = orbCfg.translateLangB,
+                            localAsrModel = localAsrDraft
                         )
                     )
                 },

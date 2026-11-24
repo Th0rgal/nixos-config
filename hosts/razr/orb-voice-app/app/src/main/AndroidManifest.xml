@@ -18,6 +18,12 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.OrbVoice">
 
+        <!-- Qualcomm Snapdragon 8 Elite Hexagon V79 NPU (FastRPC) & Adreno 830 OpenCL access on Android 12+ -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libadsprpc.so" android:required="false" />
+        <uses-native-library android:name="libsdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <!-- Motorola Razr 60 Ultra external cover screen (CLI) full-bleed -->
         <meta-data
             android:name="moto_cli_fullscreen_mode"

@@ -75,6 +75,7 @@ class VoiceRecorderService : Service() {
     companion object {
         const val ACTION_START = "com.th0rgal.orbvoice.START"
         const val ACTION_STOP = "com.th0rgal.orbvoice.STOP"
+        const val ACTION_BENCHMARK = "com.th0rgal.orbvoice.BENCHMARK"
         const val EXTRA_TRANSLATE_MODE = "translate_mode"
         const val EXTRA_LANG_A = "lang_a"
         const val EXTRA_LANG_B = "lang_b"
@@ -210,6 +211,10 @@ class VoiceRecorderService : Service() {
                 beginCapture()
             }
             ACTION_STOP -> stopCapture()
+            ACTION_BENCHMARK -> {
+                val wav = intent.getStringExtra("wav_path") ?: "/storage/emulated/0/Documents/OrbVoice/2026-11-24_22-02-52.wav"
+                Thread { LocalAsrEngine.runBenchmarkSuite(applicationContext, wav) }.start()
+            }
         }
         return START_NOT_STICKY
     }
@@ -480,12 +485,27 @@ class VoiceRecorderService : Service() {
         val sparkAsrUrl = prefs.getString("spark_asr_url", NpuTranscriptionEngine.DEFAULT_SPARK_ASR_URL)
             ?: NpuTranscriptionEngine.DEFAULT_SPARK_ASR_URL
 
-        _state.value = _state.value.copy(statusMessage = "Loading WeSpeaker ResNet293 + Parakeet-v3…")
+        val orbCfgInit = OrbRouterConfig.load(this)
+        val preferredAsr = LocalAsrEngine.AsrModel.fromId(orbCfgInit.localAsrModel)
+        // Cohere-Transcribe-2B with lang="fr" faithfully transcribes BOTH French & English verbatim
+        // (whereas lang="en" forces French speech to be translated into English). If Translate mode
+        // pairs two other languages (e.g. Spanish + Portuguese), pick the non-English language code.
+        val cohereLangHint = run {
+            val langMap = mapOf(
+                "French" to "fr", "Spanish" to "es", "German" to "de",
+                "Italian" to "it", "Portuguese" to "pt", "English" to "en"
+            )
+            val pair = listOf(orbCfgInit.translateLangA, orbCfgInit.translateLangB)
+            val nonEn = pair.firstOrNull { !it.equals("English", ignoreCase = true) }
+            langMap[nonEn] ?: "fr"
+        }
+
+        _state.value = _state.value.copy(statusMessage = "Loading Hexagon V79 NPU + ${preferredAsr.label}…")
         val neuralEngine = SpeakerDiarizer.NeuralSpeakerEngine.create(this)
-        val localAsr = LocalAsrEngine.create(this)
+        val localAsr = LocalAsrEngine.create(this, preferredId = orbCfgInit.localAsrModel, languageHint = cohereLangHint)
         val sparkOnline = if (localAsr == null) NpuTranscriptionEngine.probeSparkReachable(sparkAsrUrl) else false
         if (localAsr == null && !sparkOnline) {
-            // Fallback to on-device Google SODA only if Parakeet-v3 isn't installed and Spark isn't reachable
+            // Fallback to on-device Google SODA only if no local ASR is installed and Spark isn't reachable
             startOnDeviceSpeechRecognizer()
         }
 
@@ -532,7 +552,7 @@ class VoiceRecorderService : Service() {
             _state.value = _state.value.copy(speakerNames = seededNames + _state.value.speakerNames)
         }
         val activeEngineTag = when {
-            localAsr != null -> "${tracker.engineName} + Parakeet-v3"
+            localAsr != null -> "${tracker.engineName} + ${localAsr.modelLabel}"
             sparkOnline -> "${tracker.engineName} + Spark"
             else -> "${tracker.engineName} + SODA"
         }

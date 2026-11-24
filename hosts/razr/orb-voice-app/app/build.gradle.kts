@@ -45,6 +45,10 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Mandatory for Qualcomm Hexagon V79 FastRPC to load libQnnHtpV79Skel.so from disk!
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -58,8 +62,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // Hexagon V79 NPU acceleration via ONNX Runtime QNN Execution Provider (WeSpeaker ResNet293-LM)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.20.0")
+    // Hexagon V79 NPU acceleration via ONNX Runtime QNN Execution Provider (1.29.0 bundles V79 Skel/Stub!)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.29.0")
     // Sherpa-ONNX (static-linked ORT to avoid libonnxruntime.so collision) for Parakeet-TDT-0.6B-v3 + Silero VAD v5
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-2.0.3.aar"))
 
