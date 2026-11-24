@@ -951,6 +951,14 @@ private class DesktopSurfaceView(
                         onPointer(cursorX.roundToInt(), cursorY.roundToInt(), 0)
                     } else if (!moved && dur < 320L) {
                         val btn = if (maxPointers >= 2) 4 else 1
+                        // Direct-tap shortcut for the top status bar (Spaces 1..5, Battery, Tray):
+                        // tapping directly on the top bar always clicks under your finger even in Mouse mode!
+                        val tapFbY = viewToFbY(ev.y)
+                        val barBand = (fbH * 0.09f).coerceIn(44f, 110f)
+                        if (maxPointers == 1 && tapFbY <= barBand) {
+                            cursorX = viewToFbX(ev.x)
+                            cursorY = tapFbY
+                        }
                         sendCleanClick(cursorX.roundToInt(), cursorY.roundToInt(), btn)
                         if (maxPointers == 1) lastTapTime = ev.eventTime
                     }
