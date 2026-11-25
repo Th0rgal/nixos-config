@@ -1779,32 +1779,45 @@ private fun SettingsModalSheet(
                 letterSpacing = 0.8.sp,
                 color = OrbFgSubtle
             )
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf(
-                    LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nBest Accuracy",
-                    LocalAsrEngine.AsrModel.QWEN3_0_6B.id to "Qwen3 0.6B\n30+ Auto-Lang",
-                    LocalAsrEngine.AsrModel.PARAKEET_V3.id to "Parakeet 0.6B\nUltra-Fast"
-                ).forEach { (id, label) ->
-                    val selected = localAsrDraft == id
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (selected) OrbGreen.copy(alpha = 0.16f) else OrbBg)
-                            .border(1.dp, if (selected) OrbGreen else OrbBorder, RoundedCornerShape(8.dp))
-                            .clickable { localAsrDraft = id }
-                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                        contentAlignment = Alignment.Center
+                val rows = listOf(
+                    listOf(
+                        LocalAsrEngine.AsrModel.QWEN3_1_7B_LORA.id to "Qwen3 1.7B LoRA\n#1 Tech · 4.4% WER",
+                        LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nFast Live · Noisy"
+                    ),
+                    listOf(
+                        LocalAsrEngine.AsrModel.QWEN3_0_6B.id to "Qwen3 0.6B\n30+ Auto-Lang",
+                        LocalAsrEngine.AsrModel.PARAKEET_V3.id to "Parakeet 0.6B\n18× Ultra-Fast"
+                    )
+                )
+                rows.forEach { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (selected) OrbGreen else OrbFgMuted,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
+                        pair.forEach { (id, label) ->
+                            val selected = localAsrDraft == id
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) OrbGreen.copy(alpha = 0.16f) else OrbBg)
+                                    .border(1.dp, if (selected) OrbGreen else OrbBorder, RoundedCornerShape(8.dp))
+                                    .clickable { localAsrDraft = id }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (selected) OrbGreen else OrbFgMuted,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
                     }
                 }
             }

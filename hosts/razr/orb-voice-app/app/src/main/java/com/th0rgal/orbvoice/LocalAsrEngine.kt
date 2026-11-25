@@ -32,9 +32,10 @@ import java.nio.ByteOrder
  *  - VAD: Silero VAD v5 (~640 KB) for surgical speech/pause segmentation.
  */
 class LocalAsrEngine private constructor(
-    private val recognizer: OfflineRecognizer,
+    private val recognizer: OfflineRecognizer?,
     private val vad: Vad?,
-    val modelLabel: String
+    val modelLabel: String,
+    private val useLocalQwen3Server: Boolean = false
 ) : Closeable {
 
     val hasSileroVad: Boolean get() = vad != null
@@ -44,11 +45,15 @@ class LocalAsrEngine private constructor(
         if (samples.size < 3200) return "" // < 200ms
         return try {
             val normalized = normalizeQuietAudio(samples)
+            if (useLocalQwen3Server) {
+                return LocalQwen3ServerClient.transcribe(normalized)
+            }
+            val rec = recognizer ?: return ""
             val t0 = System.nanoTime()
-            val stream = recognizer.createStream()
+            val stream = rec.createStream()
             stream.acceptWaveform(normalized, 16000)
-            recognizer.decode(stream)
-            val text = recognizer.getResult(stream).text.trim()
+            rec.decode(stream)
+            val text = rec.getResult(stream).text.trim()
             stream.release()
             val ms = (System.nanoTime() - t0) / 1_000_000L
             Log.d("OrbVoice", "$modelLabel decoded ${samples.size / 16000f}s in ${ms}ms -> ${text.take(60)}")
@@ -117,10 +122,11 @@ class LocalAsrEngine private constructor(
 
     override fun close() {
         try { vad?.release() } catch (_: Exception) {}
-        try { recognizer.release() } catch (_: Exception) {}
+        try { recognizer?.release() } catch (_: Exception) {}
     }
 
     enum class AsrModel(val id: String, val label: String) {
+        QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B LoRA"),
         COHERE_2B("cohere", "Cohere Transcribe 2B"),
         CANARY_1B("canary-1b", "Canary-1B v2"),
         QWEN3_1_7B("qwen3-1.7b", "Qwen3-ASR 1.7B"),
@@ -205,8 +211,11 @@ class LocalAsrEngine private constructor(
                     val s = rec.createStream()
                     s.acceptWaveform(samples, 16000)
                     rec.decode(s)
-                    val out = rec.getResult(s).text.trim()
+                    var out = rec.getResult(s).text.trim()
                     s.release()
+                    // Mandatory Canary special-token loop guard (stop at first <|...|> token after text)
+                    val spIdx = out.indexOf("<|")
+                    if (spIdx > 0) out = out.substring(0, spIdx).trim()
                     out.ifBlank { null }
                 } catch (e: Throwable) {
                     Log.w("OrbVoice", "Canary offline translate ($key) failed: ${e.message}")
@@ -256,9 +265,43 @@ class LocalAsrEngine private constructor(
             return null
         }
 
+        private fun createSileroVad(context: Context): Vad? {
+            val vadFile = findSileroVad(context) ?: return null
+            return try {
+                val vCfg = VadModelConfig(
+                    sileroVadModelConfig = SileroVadModelConfig(
+                        model = vadFile.absolutePath,
+                        threshold = 0.25f,
+                        minSilenceDuration = 0.45f,
+                        minSpeechDuration = 0.15f,
+                        windowSize = 512,
+                        maxSpeechDuration = 8.0f
+                    ),
+                    sampleRate = 16000,
+                    numThreads = 2,
+                    provider = "cpu",
+                    debug = false
+                )
+                Vad(assetManager = null, config = vCfg)
+            } catch (e: Throwable) {
+                Log.w("OrbVoice", "Silero VAD init failed: ${e.message}")
+                null
+            }
+        }
+
         private fun createSpecific(context: Context, model: AsrModel, languageHint: String): LocalAsrEngine? {
             val t0 = System.nanoTime()
+            if (model == AsrModel.QWEN3_1_7B_LORA) {
+                if (!LocalQwen3ServerClient.isHealthy()) {
+                    Log.i("OrbVoice", "Local Qwen3-1.7B-LoRA llama-server not running on 127.0.0.1:8089; falling back")
+                    return null
+                }
+                val vad = createSileroVad(context)
+                Log.i("OrbVoice", "Connected to local Qwen3 1.7B LoRA daemon on 127.0.0.1:8089 (SileroVAD=${vad != null})")
+                return LocalAsrEngine(recognizer = null, vad = vad, modelLabel = model.label, useLocalQwen3Server = true)
+            }
             val modelCfg = when (model) {
+                AsrModel.QWEN3_1_7B_LORA -> return null
                 AsrModel.COHERE_2B -> {
                     val dir = findCohereDir(context) ?: return null
                     val lang = languageHint.lowercase().take(2).ifBlank { "en" }
@@ -353,30 +396,7 @@ class LocalAsrEngine private constructor(
                     decodingMethod = "greedy_search"
                 )
                 val recognizer = OfflineRecognizer(assetManager = null, config = recCfg)
-
-                val vadFile = findSileroVad(context)
-                val vad = if (vadFile != null) {
-                    try {
-                        val vCfg = VadModelConfig(
-                            sileroVadModelConfig = SileroVadModelConfig(
-                                model = vadFile.absolutePath,
-                                threshold = 0.25f,
-                                minSilenceDuration = 0.45f,
-                                minSpeechDuration = 0.15f,
-                                windowSize = 512,
-                                maxSpeechDuration = 8.0f
-                            ),
-                            sampleRate = 16000,
-                            numThreads = 2,
-                            provider = "cpu",
-                            debug = false
-                        )
-                        Vad(assetManager = null, config = vCfg)
-                    } catch (e: Throwable) {
-                        Log.w("OrbVoice", "Silero VAD init failed: ${e.message}")
-                        null
-                    }
-                } else null
+                val vad = createSileroVad(context)
 
                 val ms = (System.nanoTime() - t0) / 1_000_000L
                 Log.i("OrbVoice", "${model.label} loaded in ${ms}ms (SileroVAD=${vad != null})")
@@ -568,6 +588,55 @@ class LocalAsrEngine private constructor(
                         rec.release()
                     }.onFailure { Log.e("ScribeBench", "$tag failed: ${it.message}") }
                 }
+            }
+
+            // 5. Wave 5: Test Static Parakeet FP16 Encoder directly on Hexagon V79 NPU (rpcmem ShMem + Opt3)!
+            val staticPk = File(modelsRoot, "parakeet-v3/encoder.fp16.static-T500.onnx")
+            if (staticPk.exists()) {
+                runCatching {
+                    val env = ai.onnxruntime.OrtEnvironment.getEnvironment()
+                    val nativeLibDir = context.applicationInfo.nativeLibraryDir
+                    val cacheFile = File(context.cacheDir, "qnn_v79_parakeet_T500_fp16.ctx.onnx")
+                    val useCache = cacheFile.exists() && cacheFile.length() > 10_000L
+                    val t0 = System.nanoTime()
+                    val opts = ai.onnxruntime.OrtSession.SessionOptions().apply {
+                        setIntraOpNumThreads(2)
+                        addConfigEntry("session.disable_cpu_ep_fallback", "1")
+                        if (!useCache) {
+                            if (cacheFile.exists()) cacheFile.delete()
+                            addConfigEntry("ep.context_enable", "1")
+                            addConfigEntry("ep.context_embed_mode", "1")
+                            addConfigEntry("ep.context_file_path", cacheFile.absolutePath)
+                        }
+                        val qnn = mutableMapOf(
+                            "backend_path" to "$nativeLibDir/libQnnHtp.so",
+                            "htp_performance_mode" to "burst",
+                            "enable_htp_fp16_precision" to "1",
+                            "htp_graph_finalization_optimization_mode" to "3",
+                            "rpc_control_latency" to "10"
+                        )
+                        if (useCache) qnn["enable_htp_shared_memory_allocator"] = "1"
+                        addQnn(qnn)
+                    }
+                    val sess = env.createSession(if (useCache) cacheFile.absolutePath else staticPk.absolutePath, opts)
+                    val loadMs = (System.nanoTime() - t0) / 1_000_000L
+                    val featBuf = java.nio.FloatBuffer.allocate(128 * 500)
+                    val lenBuf = java.nio.LongBuffer.wrap(longArrayOf(400L))
+                    val tAudio = ai.onnxruntime.OnnxTensor.createTensor(env, featBuf, longArrayOf(1L, 128L, 500L))
+                    val tLen = ai.onnxruntime.OnnxTensor.createTensor(env, lenBuf, longArrayOf(1L))
+                    val inputs = mapOf("audio_signal" to tAudio, "length" to tLen)
+                    val r1t = System.nanoTime(); sess.run(inputs).close(); val ms1 = (System.nanoTime() - r1t) / 1_000_000L
+                    val r2t = System.nanoTime(); sess.run(inputs).close(); val ms2 = (System.nanoTime() - r2t) / 1_000_000L
+                    tAudio.close(); tLen.close(); sess.close()
+                    Log.i("ScribeBench", "PARAKEET-ENCODER-HEXAGON-V79-NPU: cached=$useCache load=${loadMs}ms run1=${ms1}ms run2=${ms2}ms ctxKB=${cacheFile.length()/1024}")
+                }.onFailure { Log.e("ScribeBench", "PARAKEET-ENCODER-HEXAGON-V79-NPU failed: ${it.message}") }
+            }
+
+            // 6. Wave 5: Test local Qwen3-1.7B-Scribe-LoRA llama-server on 127.0.0.1:8089!
+            if (LocalQwen3ServerClient.isHealthy()) {
+                val tf0 = System.nanoTime(); val frTxt = LocalQwen3ServerClient.transcribe(frFloats); val frMs = (System.nanoTime() - tf0) / 1_000_000L
+                val te0 = System.nanoTime(); val enTxt = LocalQwen3ServerClient.transcribe(enFloats); val enMs = (System.nanoTime() - te0) / 1_000_000L
+                Log.i("ScribeBench", "QWEN3-1.7B-SCRIBE-LORA (127.0.0.1:8089): fr=${frMs}ms en=${enMs}ms | FR='$frTxt' | EN='$enTxt'")
             }
 
             Log.i("ScribeBench", "=== SCRIBE BENCHMARK DONE ===")
