@@ -10,6 +10,7 @@
   imports = [
     ../common/workstation.nix
     ./hardware.nix
+    ./bonsai.nix
   ];
 
   networking.hostName = "razr";
