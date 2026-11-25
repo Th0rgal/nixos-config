@@ -95,10 +95,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -668,72 +670,111 @@ private fun DynamicIslandRecordingPill(
     val density = LocalDensity.current
     val speakerColors = LocalOrbPalette.current.speakerColors
     val activeColor = recState.activeSpeakerIndex?.let { speakerColors[it % speakerColors.size] } ?: OrbRed
-    val cutoutWdp = with(density) { (cutoutRect?.width() ?: 96).toDp() }
-    val cutoutHdp = with(density) { (cutoutRect?.height() ?: 92).toDp() }
+    // Razr 60 Ultra cutout is Rect(554, 0 - 670, 130) @ 480dpi -> 38.7dp x 43.3dp centered horizontally.
+    // Using strictly symmetric Left & Right wings guarantees the pure #000000 center dead-zone
+    // lands dead-center on the physical punch-hole lens so neither dot nor timer ever overlaps it.
+    val cutoutWdp = with(density) { (cutoutRect?.width() ?: 116).toDp() }
+    val cutoutHdp = with(density) { (cutoutRect?.height() ?: 120).toDp() }
+    val cameraDeadZone = (cutoutWdp + 6.dp).coerceIn(38.dp, 54.dp)
+    val pillHeight = (cutoutHdp - 4.dp).coerceIn(36.dp, 42.dp)
+    val wingWidth = 92.dp
 
     Box(modifier = modifier.padding(top = 4.dp)) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = if (expanded) OrbSurface.copy(alpha = 0.94f) else androidx.compose.ui.graphics.Color(0xFF000000),
-            border = BorderStroke(
-                1.dp,
-                if (expanded) OrbBorder else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f)
-            ),
+            shape = RoundedCornerShape(22.dp),
+            color = androidx.compose.ui.graphics.Color(0xFF000000),
+            border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)),
             modifier = Modifier.animateContentSize()
         ) {
-            if (!expanded) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Top camera-hugging row: symmetric Left Wing | Camera Dead-Zone | Right Wing
                 Row(
                     modifier = Modifier
                         .clickable(onClick = onToggleExpand)
-                        .height(cutoutHdp.coerceAtLeast(34.dp))
+                        .height(pillHeight)
                         .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(activeColor))
-                    Spacer(modifier = Modifier.width(cutoutWdp.coerceAtLeast(28.dp)))
-                    Text(
-                        text = VoiceNoteStore.formatTimestamp(recState.elapsedMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = androidx.compose.ui.graphics.Color.White
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.ExpandMore,
-                        contentDescription = "Expand",
-                        tint = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f),
-                        modifier = Modifier.size(14.dp)
-                    )
+                    // Left Wing (exact width == Right Wing): active speaker dot + Murmure 120 FPS fluid waveform
+                    Row(
+                        modifier = Modifier.width(wingWidth),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(activeColor)
+                        )
+                        MurmureFluidWaveform(
+                            barCount = 14,
+                            isProcessing = recState.isProcessing,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(18.dp)
+                        )
+                    }
+
+                    // Center dead-zone: pure #000000 over the physical punch-hole camera lens
+                    Spacer(modifier = Modifier.width(cameraDeadZone))
+
+                    // Right Wing (exact width == Left Wing): tabular monospace timer + chevron
+                    Row(
+                        modifier = Modifier.width(wingWidth),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = VoiceNoteStore.formatTimestamp(recState.elapsedMs),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = androidx.compose.ui.graphics.Color.White
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.ExpandMore,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            tint = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.70f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
-            } else {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(activeColor))
-                    Text(
-                        text = VoiceNoteStore.formatTimestamp(recState.elapsedMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = OrbFgStrong
+
+                // Expanded controls drop cleanly BELOW the punch-hole camera
+                if (expanded) {
+                    HorizontalDivider(
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.10f),
+                        thickness = 1.dp,
+                        modifier = Modifier.width(wingWidth * 2 + cameraDeadZone)
                     )
-                    Text(
-                        text = "Stream",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = OrbBlue,
-                        modifier = Modifier.clickable(onClick = onShowStream).padding(horizontal = 4.dp)
-                    )
-                    Text(
-                        text = "Stop",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = OrbRed,
-                        modifier = Modifier.clickable(onClick = onStop).padding(horizontal = 4.dp)
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.ExpandMore,
-                        contentDescription = "Collapse",
-                        tint = OrbFgMuted,
-                        modifier = Modifier.size(16.dp).clickable(onClick = onToggleExpand)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .width(wingWidth * 2 + cameraDeadZone)
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Live Stream",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = OrbBlue,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onShowStream)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                        Text(
+                            text = "Stop & Save",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = OrbRed,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onStop)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1169,8 +1210,12 @@ private fun HeroRecorderCard(recState: RecorderState, onToggleRecord: () -> Unit
                 }
             }
 
-            AnimatedVisibility(visible = recState.isRecording) {
-                WaveformBarCanvas(levels = recState.levels, modifier = Modifier.fillMaxWidth().height(40.dp))
+            AnimatedVisibility(visible = recState.isRecording || recState.isProcessing) {
+                WaveformBarCanvas(
+                    levels = recState.levels,
+                    isProcessing = recState.isProcessing,
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                )
             }
 
             Button(
@@ -1500,27 +1545,91 @@ private fun StatusChip(text: String, tint: androidx.compose.ui.graphics.Color) {
     }
 }
 
+/**
+ * Murmure-inspired pure-black fluid 60-120 FPS voice waveform capsule.
+ * Reads directly from VoiceRecorderService.copyWaveform() inside Compose's vsync
+ * frame callback (withFrameNanos) with smooth per-bar interpolation and ZERO
+ * screen-level recompositions.
+ */
 @Composable
-private fun WaveformBarCanvas(levels: List<Float>, modifier: Modifier = Modifier) {
-    val barColor = OrbRed
-    val idleColor = OrbBorder
-    Canvas(modifier = modifier) {
-        val barCount = 48
-        val gap = 3.dp.toPx()
-        val barW = ((size.width - gap * (barCount - 1)) / barCount).coerceAtLeast(2f)
-        val midY = size.height / 2f
-        val startOffset = (barCount - levels.size).coerceAtLeast(0)
-        for (i in 0 until barCount) {
-            val lvl = if (i >= startOffset) levels[i - startOffset] else 0.06f
-            val h = (size.height * lvl).coerceAtLeast(3.dp.toPx())
-            val x = i * (barW + gap)
-            drawRoundRect(
-                color = if (i >= startOffset) barColor else idleColor,
-                topLeft = Offset(x, midY - h / 2f),
-                size = Size(barW, h),
-                cornerRadius = CornerRadius(barW / 2f, barW / 2f)
-            )
+private fun MurmureFluidWaveform(
+    barCount: Int = 36,
+    isProcessing: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val targetLevels = remember(barCount) { FloatArray(barCount) }
+    val displayLevels = remember(barCount) { FloatArray(barCount) }
+    var frameNanos by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(barCount, isProcessing) {
+        while (true) {
+            withFrameNanos { now ->
+                if (!isProcessing) {
+                    VoiceRecorderService.copyWaveform(targetLevels)
+                    for (i in 0 until barCount) {
+                        displayLevels[i] += (targetLevels[i] - displayLevels[i]) * 0.32f
+                    }
+                }
+                frameNanos = now
+            }
         }
+    }
+
+    Canvas(modifier = modifier) {
+        val t = frameNanos * 1e-9
+        val dotPx = 2.dp.toPx()
+        val gap = ((size.width - dotPx * barCount) / (barCount - 1).coerceAtLeast(1)).coerceAtLeast(1.5.dp.toPx())
+        val totalW = barCount * dotPx + (barCount - 1) * gap
+        val startX = ((size.width - totalW) / 2f).coerceAtLeast(0f)
+        val midY = size.height / 2f
+        val maxBarH = (size.height - 2.dp.toPx()).coerceAtLeast(dotPx)
+
+        for (i in 0 until barCount) {
+            val x = startX + i * (dotPx + gap)
+            if (isProcessing) {
+                // Murmure transcribing state: travelling sine-wave white dots
+                val wave = kotlin.math.sin(t * 7.0 - i * 0.35).toFloat().coerceAtLeast(0f)
+                val alpha = 0.22f + 0.78f * wave
+                drawRoundRect(
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = alpha),
+                    topLeft = Offset(x, midY - dotPx / 2f),
+                    size = Size(dotPx, dotPx),
+                    cornerRadius = CornerRadius(dotPx / 2f, dotPx / 2f)
+                )
+            } else {
+                val lvl = displayLevels[i].coerceIn(0f, 1f)
+                val h = (dotPx + lvl * (maxBarH - dotPx)).coerceIn(dotPx, maxBarH)
+                val alpha = (0.35f + 0.65f * lvl).coerceIn(0.35f, 1f)
+                drawRoundRect(
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = alpha),
+                    topLeft = Offset(x, midY - h / 2f),
+                    size = Size(dotPx, h),
+                    cornerRadius = CornerRadius(dotPx / 2f, dotPx / 2f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaveformBarCanvas(
+    @Suppress("UNUSED_PARAMETER") levels: List<Float>,
+    modifier: Modifier = Modifier,
+    isProcessing: Boolean = false
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = androidx.compose.ui.graphics.Color(0xFF000000),
+        border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)),
+        modifier = modifier
+    ) {
+        MurmureFluidWaveform(
+            barCount = 36,
+            isProcessing = isProcessing,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+        )
     }
 }
 

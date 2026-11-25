@@ -35,7 +35,9 @@ class LocalAsrEngine private constructor(
     private val recognizer: OfflineRecognizer?,
     private val vad: Vad?,
     val modelLabel: String,
-    private val useLocalQwen3Server: Boolean = false
+    private val useLocalQwen3Server: Boolean = false,
+    private val appContext: Context? = null,
+    private val languageHint: String = "en"
 ) : Closeable {
 
     val hasSileroVad: Boolean get() = vad != null
@@ -54,10 +56,29 @@ class LocalAsrEngine private constructor(
             val stream = rec.createStream()
             stream.acceptWaveform(normalized, 16000)
             rec.decode(stream)
-            val text = rec.getResult(stream).text.trim()
+            var text = rec.getResult(stream).text.trim()
             stream.release()
             val ms = (System.nanoTime() - t0) / 1_000_000L
             Log.d("OrbVoice", "$modelLabel decoded ${samples.size / 16000f}s in ${ms}ms -> ${text.take(60)}")
+
+            // Anti-Chinese-bias guard for Qwen3-ASR: when Qwen3 drifts into CJK characters on
+            // short/noisy European speech (and user didn't select zh/ja), immediately re-decode
+            // the same audio with Parakeet-TDT-0.6B-v3 (25 European languages, 0% CJK, ~300ms).
+            val lang = languageHint.lowercase()
+            if (modelLabel.startsWith("Qwen3") &&
+                !lang.startsWith("zh") &&
+                !lang.startsWith("ja") &&
+                containsCjk(text)
+            ) {
+                val ctx = appContext
+                if (ctx != null) {
+                    val fallback = transcribeWithParakeetFallback(ctx, normalized)
+                    if (!fallback.isNullOrBlank()) {
+                        Log.i("OrbVoice", "Qwen3 CJK drift ('$text') -> Parakeet-v3 fallback: '$fallback'")
+                        text = fallback
+                    }
+                }
+            }
             text
         } catch (e: Throwable) {
             Log.w("OrbVoice", "$modelLabel decode failed: ${e.message}")
@@ -163,6 +184,55 @@ class LocalAsrEngine private constructor(
         private val offlineTranslatorLock = Any()
         private var cachedCanaryKey: String? = null
         private var cachedCanaryRec: OfflineRecognizer? = null
+
+        private val parakeetFallbackLock = Any()
+        private var cachedParakeetFallback: OfflineRecognizer? = null
+
+        private fun containsCjk(text: String): Boolean {
+            for (ch in text) {
+                val code = ch.code
+                if (code in 0x4E00..0x9FFF || code in 0x3400..0x4DBF || code in 0x3040..0x30FF) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        private fun transcribeWithParakeetFallback(context: Context, samples: FloatArray): String? {
+            val dir = findParakeetDir(context) ?: return null
+            synchronized(parakeetFallbackLock) {
+                return try {
+                    val rec = cachedParakeetFallback ?: OfflineRecognizer(
+                        assetManager = null,
+                        config = OfflineRecognizerConfig(
+                            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                            modelConfig = OfflineModelConfig(
+                                transducer = OfflineTransducerModelConfig(
+                                    encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                                    decoder = File(dir, "decoder.int8.onnx").absolutePath,
+                                    joiner = File(dir, "joiner.int8.onnx").absolutePath
+                                ),
+                                tokens = File(dir, "tokens.txt").absolutePath,
+                                numThreads = 4,
+                                debug = false,
+                                provider = "cpu",
+                                modelType = "nemo_transducer"
+                            ),
+                            decodingMethod = "greedy_search"
+                        )
+                    ).also { cachedParakeetFallback = it }
+                    val s = rec.createStream()
+                    s.acceptWaveform(samples, 16000)
+                    rec.decode(s)
+                    val out = rec.getResult(s).text.trim()
+                    s.release()
+                    out.ifBlank { null }
+                } catch (e: Throwable) {
+                    Log.w("OrbVoice", "Parakeet CJK fallback failed: ${e.message}")
+                    null
+                }
+            }
+        }
 
         /**
          * 100% offline speech-to-text translation fallback using NVIDIA Canary-1B-v2 INT8
@@ -401,7 +471,13 @@ class LocalAsrEngine private constructor(
 
                 val ms = (System.nanoTime() - t0) / 1_000_000L
                 Log.i("OrbVoice", "${model.label} loaded in ${ms}ms (SileroVAD=${vad != null})")
-                LocalAsrEngine(recognizer, vad, model.label)
+                LocalAsrEngine(
+                    recognizer = recognizer,
+                    vad = vad,
+                    modelLabel = model.label,
+                    appContext = context.applicationContext,
+                    languageHint = languageHint
+                )
             } catch (e: Throwable) {
                 Log.w("OrbVoice", "${model.label} init failed: ${e.message}")
                 null

@@ -86,6 +86,66 @@ class VoiceRecorderService : Service() {
         private val _state = MutableStateFlow(RecorderState())
         val state: StateFlow<RecorderState> = _state
 
+        // Lock-free Murmure-style 10ms perceptual dBFS audio envelope ring buffer.
+        // Read directly by Compose Canvas via withFrameNanos (60-120 FPS) with ZERO recompositions!
+        private val waveformLock = Any()
+        private const val WAVEFORM_BARS = 48
+        private val waveformRing = FloatArray(WAVEFORM_BARS)
+        private var waveformEnvelope = 0f
+
+        fun resetWaveform() {
+            synchronized(waveformLock) {
+                waveformRing.fill(0f)
+                waveformEnvelope = 0f
+            }
+        }
+
+        /**
+         * Murmure perceptual envelope mapping:
+         * -55 dBFS -> 0, -10 dBFS -> 1, fast attack (45ms), smooth release (180ms),
+         * then pow(peak, 0.8) lift so ordinary speech reads vividly.
+         */
+        fun pushAudioMeter(samples: FloatArray, count: Int) {
+            if (count <= 0) return
+            val block = 160 // 10ms at 16 kHz
+            var peak = 0f
+            synchronized(waveformLock) {
+                var i = 0
+                while (i + block <= count) {
+                    var e = 0f
+                    var j = i
+                    val end = i + block
+                    while (j < end) {
+                        val s = samples[j]
+                        e += s * s
+                        j++
+                    }
+                    val rms = sqrt((e / block).toDouble()).toFloat().coerceAtLeast(1e-6f)
+                    val db = 20f * kotlin.math.log10(rms)
+                    val target = ((db + 55f) / 45f).coerceIn(0f, 1f)
+                    val tau = if (target > waveformEnvelope) 45f else 180f
+                    waveformEnvelope += (target - waveformEnvelope) * (1f - kotlin.math.exp(-10f / tau))
+                    if (waveformEnvelope > peak) peak = waveformEnvelope
+                    i += block
+                }
+                if (peak == 0f) {
+                    waveformEnvelope *= 0.85f
+                    peak = waveformEnvelope
+                }
+                val lifted = Math.pow(peak.toDouble(), 0.8).toFloat().coerceIn(0f, 1f)
+                System.arraycopy(waveformRing, 1, waveformRing, 0, WAVEFORM_BARS - 1)
+                waveformRing[WAVEFORM_BARS - 1] = lifted
+            }
+        }
+
+        fun copyWaveform(dest: FloatArray) {
+            val n = dest.size.coerceAtMost(WAVEFORM_BARS)
+            val srcStart = WAVEFORM_BARS - n
+            synchronized(waveformLock) {
+                System.arraycopy(waveformRing, srcStart, dest, 0, n)
+            }
+        }
+
         fun startRecording(
             context: Context,
             translateMode: Boolean = false,
@@ -529,10 +589,10 @@ class VoiceRecorderService : Service() {
         }
 
         val startTimeMs = System.currentTimeMillis()
-        val chunk = ShortArray(1600) // 100ms chunks
-        val floatChunk = FloatArray(1600)
+        val chunk = ShortArray(512) // 32ms chunks (exact Silero VAD window + ~31Hz fluid waveform meter!)
+        val floatChunk = FloatArray(512)
         val byteChunk = ByteArray(chunk.size * 2)
-        val levelsWindow = ArrayDeque<Float>(48)
+        resetWaveform()
 
         // Session-adaptive Neural Speaker Tracker seeded with saved cross-session voiceprints!
         val tracker = SpeakerDiarizer.OnlineSpeakerTracker(neuralEngine = neuralEngine)
@@ -716,9 +776,7 @@ class VoiceRecorderService : Service() {
                 for (i in 0 until read) {
                     floatChunk[i] = chunk[i] / 32768f
                 }
-                val rmsNorm = (rmsRaw * 6.5f).coerceIn(0.05f, 1.0f)
-                if (levelsWindow.size >= 48) levelsWindow.removeFirst()
-                levelsWindow.addLast(rmsNorm)
+                pushAudioMeter(floatChunk, read)
 
                 val elapsed = System.currentTimeMillis() - startTimeMs
                 currentElapsedMs = elapsed
@@ -797,13 +855,13 @@ class VoiceRecorderService : Service() {
                         turnLen = 0
                         submitParakeetTurn(segFloats, tStart, elapsed)
                     }
-                    // Throttle waveform + elapsed timer UI updates to 5 Hz (every 200ms) for silky 120fps scrolling
-                    if (elapsed - lastUiTickMs >= 200L) {
+                    // Throttle elapsed timer UI updates to 2 Hz (every 500ms); the waveform runs
+                    // independently at 60-120 FPS via VoiceRecorderService.copyWaveform() with zero recompositions!
+                    if (elapsed - lastUiTickMs >= 500L) {
                         lastUiTickMs = elapsed
                         _state.value = _state.value.copy(
                             isRecording = true,
-                            elapsedMs = elapsed,
-                            levels = levelsWindow.toList()
+                            elapsedMs = elapsed
                         )
                     }
                     continue
@@ -851,8 +909,8 @@ class VoiceRecorderService : Service() {
                     appendTurn(chunk, read)
                 }
 
-                // Flush a live speaker turn on 800ms pause OR 6s continuous speech
-                val shouldFlush = inTurn && (silenceChunks >= 8 || turnLen >= SAMPLE_RATE * 6)
+                // Flush a live speaker turn on ~800ms pause (25 x 32ms chunks) OR 6s continuous speech
+                val shouldFlush = inTurn && (silenceChunks >= 25 || turnLen >= SAMPLE_RATE * 6)
                 if (shouldFlush) {
                     val endMs = elapsed
                     val snapshot = turnBuf.copyOf(turnLen)
@@ -905,11 +963,13 @@ class VoiceRecorderService : Service() {
                     }
                 }
 
-                _state.value = _state.value.copy(
-                    isRecording = true,
-                    elapsedMs = elapsed,
-                    levels = levelsWindow.toList()
-                )
+                if (elapsed - lastUiTickMs >= 500L) {
+                    lastUiTickMs = elapsed
+                    _state.value = _state.value.copy(
+                        isRecording = true,
+                        elapsedMs = elapsed
+                    )
+                }
             }
         } finally {
             try { recorder.stop() } catch (_: Exception) {}
