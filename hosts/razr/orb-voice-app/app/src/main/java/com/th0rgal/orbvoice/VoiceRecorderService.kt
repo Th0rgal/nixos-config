@@ -565,6 +565,7 @@ class VoiceRecorderService : Service() {
         var noiseFloor = 0.008f
         var earlyClassified = false
         var lastPreviewDecodeMs = 0L
+        val previewInFlight = AtomicBoolean(false)
         lastCommittedSpeechText = ""
         currentSpeakerIndex = 0
         currentTurnStartMs = 0L
@@ -708,16 +709,11 @@ class VoiceRecorderService : Service() {
                 appendToRing(chunk, read)
 
                 val rmsRaw = sqrt(sumSq / read).toFloat()
-                // Gentle room-mic AGC for Silero VAD & Parakeet-v3 so quieter/distant speakers
-                // (e.g. students answering across a room) are captured as cleanly as the main speaker.
-                val agcGain = if (rmsRaw > 0.0025f && rmsRaw < 0.06f) {
-                    (0.08f / rmsRaw).coerceIn(1.0f, 4.5f)
-                } else {
-                    1.0f
-                }
+                // Feed clean, unpumped raw float PCM to Silero VAD & ASR (no 100ms chunk-level gain pumping,
+                // which distorts consonants!). Quiet far-field utterances are smoothly RMS-normalized
+                // per full utterance inside LocalAsrEngine.normalizeQuietAudio().
                 for (i in 0 until read) {
-                    val boosted = (chunk[i] / 32768f) * agcGain
-                    floatChunk[i] = boosted.coerceIn(-0.98f, 0.98f)
+                    floatChunk[i] = chunk[i] / 32768f
                 }
                 val rmsNorm = (rmsRaw * 6.5f).coerceIn(0.05f, 1.0f)
                 if (levelsWindow.size >= 48) levelsWindow.removeFirst()
@@ -753,9 +749,14 @@ class VoiceRecorderService : Service() {
                                 _state.value = _state.value.copy(activeSpeakerIndex = spk)
                             }
                         }
-                        // Live streaming preview every ~1.4s while speaking — also classifies brand-new
-                        // unseen speakers on the 12ms Hexagon V79 NPU in parallel with ASR preview!
-                        if (elapsed - lastPreviewDecodeMs >= 1400L && turnLen >= SAMPLE_RATE / 2) {
+                        // Live streaming preview every ~1.8s while speaking — skipped if a preview is already
+                        // running OR when using the heavyweight Qwen3 1.7B LoRA daemon so final turns never
+                        // queue behind stale previews!
+                        if (!localAsr.isHeavyweight &&
+                            elapsed - lastPreviewDecodeMs >= 1800L &&
+                            turnLen >= SAMPLE_RATE / 2 &&
+                            previewInFlight.compareAndSet(false, true)
+                        ) {
                             lastPreviewDecodeMs = elapsed
                             val snapLen = turnLen
                             val snapShorts = turnBuf.copyOf(snapLen)
@@ -766,19 +767,23 @@ class VoiceRecorderService : Service() {
                                 }
                             } else null
                             asrExecutor.execute {
-                                if (!recording.get()) return@execute
-                                val preview = localAsr.transcribe(snapFloats)
-                                val spk = try {
-                                    previewSpkFuture?.get() ?: currentSpeakerIndex
-                                } catch (_: Exception) {
-                                    currentSpeakerIndex
-                                }
-                                currentSpeakerIndex = spk
-                                if (preview.isNotBlank() && recording.get()) {
-                                    _state.value = _state.value.copy(
-                                        activeSpeakerIndex = spk,
-                                        partialText = preview
-                                    )
+                                try {
+                                    if (!recording.get()) return@execute
+                                    val preview = localAsr.transcribe(snapFloats)
+                                    val spk = try {
+                                        previewSpkFuture?.get() ?: currentSpeakerIndex
+                                    } catch (_: Exception) {
+                                        currentSpeakerIndex
+                                    }
+                                    currentSpeakerIndex = spk
+                                    if (preview.isNotBlank() && recording.get()) {
+                                        _state.value = _state.value.copy(
+                                            activeSpeakerIndex = spk,
+                                            partialText = preview
+                                        )
+                                    }
+                                } finally {
+                                    previewInFlight.set(false)
                                 }
                             }
                         }

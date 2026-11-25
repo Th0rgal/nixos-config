@@ -39,6 +39,7 @@ class LocalAsrEngine private constructor(
 ) : Closeable {
 
     val hasSileroVad: Boolean get() = vad != null
+    val isHeavyweight: Boolean get() = useLocalQwen3Server
 
     @Synchronized
     fun transcribe(samples: FloatArray): String {
@@ -127,15 +128,15 @@ class LocalAsrEngine private constructor(
 
     enum class AsrModel(val id: String, val label: String) {
         QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B LoRA"),
+        QWEN3_0_6B("qwen3-0.6b", "Qwen3-ASR 0.6B"),
+        PARAKEET_V3("parakeet", "Parakeet-TDT 0.6B v3"),
         COHERE_2B("cohere", "Cohere Transcribe 2B"),
         CANARY_1B("canary-1b", "Canary-1B v2"),
         QWEN3_1_7B("qwen3-1.7b", "Qwen3-ASR 1.7B"),
-        QWEN3_0_6B("qwen3-0.6b", "Qwen3-ASR 0.6B"),
-        PARAKEET_V3("parakeet", "Parakeet-TDT 0.6B v3"),
         WHISPER_TURBO("whisper", "Whisper Large-v3 Turbo");
 
         companion object {
-            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: COHERE_2B
+            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: QWEN3_1_7B_LORA
         }
     }
 
@@ -272,10 +273,10 @@ class LocalAsrEngine private constructor(
                     sileroVadModelConfig = SileroVadModelConfig(
                         model = vadFile.absolutePath,
                         threshold = 0.25f,
-                        minSilenceDuration = 0.45f,
-                        minSpeechDuration = 0.15f,
+                        minSilenceDuration = 0.65f,
+                        minSpeechDuration = 0.20f,
                         windowSize = 512,
-                        maxSpeechDuration = 8.0f
+                        maxSpeechDuration = 12.0f
                     ),
                     sampleRate = 16000,
                     numThreads = 2,
