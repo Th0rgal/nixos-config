@@ -18,6 +18,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -690,20 +691,19 @@ private fun DynamicIslandRecordingPill(
     val activeColor = activeIdx?.let { speakerColors[it % speakerColors.size] } ?: OrbRed
     val activeLabel = activeIdx?.let { recState.speakerNames[it] ?: "S${it + 1}" } ?: "REC"
 
-    // Razr 60 Ultra cutout is Rect(554, 0 - 670, 130) @ 480dpi -> 38.7dp x 43.3dp dead-center.
-    // Extended-notification Dynamic Island:
-    //  - Top row has strictly symmetric Left & Right wings around the centered #000000 lens dead-zone
-    //  - Directly underneath the lens (inside the same obsidian pill) sits the single 120 FPS Murmure waveform!
+    // Razr 60 Ultra screen is 408dp wide; status-bar icons occupy ~0..105dp (left) and ~305..408dp (right).
+    // Keeping total island width at ~186dp (62 + 42 + 62 + 20 pad) centers it cleanly between the
+    // left/right system status icons while wrapping the physical punch-hole camera dead-center.
     val cutoutWdp = with(density) { (cutoutRect?.width() ?: 116).toDp() }
     val cutoutHdp = with(density) { (cutoutRect?.height() ?: 120).toDp() }
-    val cameraDeadZone = (cutoutWdp + 6.dp).coerceIn(38.dp, 54.dp)
-    val topRowHeight = (cutoutHdp - 4.dp).coerceIn(34.dp, 40.dp)
-    val wingWidth = 84.dp
+    val cameraDeadZone = (cutoutWdp + 4.dp).coerceIn(38.dp, 46.dp)
+    val topRowHeight = (cutoutHdp - 6.dp).coerceIn(32.dp, 38.dp)
+    val wingWidth = 62.dp
     val islandContentWidth = wingWidth * 2 + cameraDeadZone
 
     Box(modifier = modifier.padding(top = 4.dp)) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(22.dp),
             color = androidx.compose.ui.graphics.Color(0xFF000000),
             border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)),
             modifier = Modifier.animateContentSize()
@@ -712,7 +712,7 @@ private fun DynamicIslandRecordingPill(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable(onClick = onToggleExpand)
-                    .padding(horizontal = 14.dp)
+                    .padding(horizontal = 10.dp)
             ) {
                 // Row 1: Symmetric camera-hugging header (Speaker dot+label | #000000 Camera | Timer+chevron)
                 Row(
@@ -766,12 +766,12 @@ private fun DynamicIslandRecordingPill(
 
                 // Row 2: Extended-notification Murmure fluid 120 FPS waveform directly under the camera lens
                 MurmureFluidWaveform(
-                    barCount = 30,
+                    barCount = 26,
                     isProcessing = recState.isProcessing,
                     modifier = Modifier
                         .width(islandContentWidth)
-                        .height(22.dp)
-                        .padding(bottom = 8.dp)
+                        .height(20.dp)
+                        .padding(bottom = 7.dp)
                 )
 
                 // Row 3 (Expanded): Quick actions below the waveform
@@ -907,13 +907,21 @@ private fun PhoneAndCoverBody(
     onRenameLiveSpeaker: (Int, String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    val topExtraPad by animateDpAsState(
+        targetValue = when {
+            isCoverScreen -> 8.dp
+            recState.isRecording -> 36.dp
+            else -> 14.dp
+        },
+        label = "islandClearance"
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = if (isCoverScreen) 14.dp else 20.dp)
-            .padding(top = if (isCoverScreen) 8.dp else 14.dp)
+            .padding(top = topExtraPad)
     ) {
         TopOrbBar(
             recState = recState,
