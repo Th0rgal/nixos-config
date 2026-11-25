@@ -14,6 +14,9 @@
  *   CHARGE_CAP_SET <off|0|60..100>
  *   CHARGE_CAP_GET
  *   HINGE_GET
+ *   BONSAI_START [npu|vulkan]
+ *   BONSAI_STOP
+ *   BONSAI_STATUS
  *
  * Also runs:
  *   - Closed-loop thermal governor ONLY while performance profile is active.
@@ -441,6 +444,49 @@ static void handle_client(int fd) {
         char reply[64];
         snprintf(reply, sizeof(reply), "OK %s", st);
         send_line(fd, reply);
+        close(fd);
+        return;
+    }
+
+    if (strncmp(buf, "BONSAI_START", 12) == 0 && (buf[12] == '\0' || buf[12] == ' ')) {
+        const char *mode = (buf[12] == ' ' && buf[13] != '\0') ? (buf + 13) : "npu";
+        if (strcmp(mode, "npu") != 0 && strcmp(mode, "vulkan") != 0) {
+            send_line(fd, "ERR invalid_bonsai_mode");
+            close(fd);
+            return;
+        }
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/system/bin/sh", "sh", "/data/local/tmp/bonsai-shootout/bonsai-backend-ctl.sh", "start", mode, (char *)NULL);
+            _exit(127);
+        }
+        if (pid > 0) {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+        }
+        send_line(fd, "OK");
+        close(fd);
+        return;
+    }
+
+    if (strcmp(buf, "BONSAI_STOP") == 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/system/bin/sh", "sh", "/data/local/tmp/bonsai-shootout/bonsai-backend-ctl.sh", "stop", (char *)NULL);
+            _exit(127);
+        }
+        if (pid > 0) {
+            int st = 0;
+            (void)waitpid(pid, &st, 0);
+        }
+        send_line(fd, "OK");
+        close(fd);
+        return;
+    }
+
+    if (strcmp(buf, "BONSAI_STATUS") == 0) {
+        int rc = system("/system/bin/sh /data/local/tmp/bonsai-shootout/bonsai-backend-ctl.sh status >/dev/null 2>&1");
+        send_line(fd, (rc == 0) ? "OK running" : "OK stopped");
         close(fd);
         return;
     }
