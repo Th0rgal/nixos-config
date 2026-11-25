@@ -669,37 +669,43 @@ private fun DynamicIslandRecordingPill(
 ) {
     val density = LocalDensity.current
     val speakerColors = LocalOrbPalette.current.speakerColors
-    val activeColor = recState.activeSpeakerIndex?.let { speakerColors[it % speakerColors.size] } ?: OrbRed
-    // Razr 60 Ultra cutout is Rect(554, 0 - 670, 130) @ 480dpi -> 38.7dp x 43.3dp centered horizontally.
-    // Using strictly symmetric Left & Right wings guarantees the pure #000000 center dead-zone
-    // lands dead-center on the physical punch-hole lens so neither dot nor timer ever overlaps it.
+    val activeIdx = recState.activeSpeakerIndex
+    val activeColor = activeIdx?.let { speakerColors[it % speakerColors.size] } ?: OrbRed
+    val activeLabel = activeIdx?.let { recState.speakerNames[it] ?: "S${it + 1}" } ?: "REC"
+
+    // Razr 60 Ultra cutout is Rect(554, 0 - 670, 130) @ 480dpi -> 38.7dp x 43.3dp dead-center.
+    // Extended-notification Dynamic Island:
+    //  - Top row has strictly symmetric Left & Right wings around the centered #000000 lens dead-zone
+    //  - Directly underneath the lens (inside the same obsidian pill) sits the single 120 FPS Murmure waveform!
     val cutoutWdp = with(density) { (cutoutRect?.width() ?: 116).toDp() }
     val cutoutHdp = with(density) { (cutoutRect?.height() ?: 120).toDp() }
     val cameraDeadZone = (cutoutWdp + 6.dp).coerceIn(38.dp, 54.dp)
-    val pillHeight = (cutoutHdp - 4.dp).coerceIn(36.dp, 42.dp)
-    val wingWidth = 92.dp
+    val topRowHeight = (cutoutHdp - 4.dp).coerceIn(34.dp, 40.dp)
+    val wingWidth = 84.dp
+    val islandContentWidth = wingWidth * 2 + cameraDeadZone
 
     Box(modifier = modifier.padding(top = 4.dp)) {
         Surface(
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(24.dp),
             color = androidx.compose.ui.graphics.Color(0xFF000000),
             border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)),
             modifier = Modifier.animateContentSize()
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Top camera-hugging row: symmetric Left Wing | Camera Dead-Zone | Right Wing
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clickable(onClick = onToggleExpand)
+                    .padding(horizontal = 14.dp)
+            ) {
+                // Row 1: Symmetric camera-hugging header (Speaker dot+label | #000000 Camera | Timer+chevron)
                 Row(
-                    modifier = Modifier
-                        .clickable(onClick = onToggleExpand)
-                        .height(pillHeight)
-                        .padding(horizontal = 12.dp),
+                    modifier = Modifier.height(topRowHeight),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left Wing (exact width == Right Wing): active speaker dot + Murmure 120 FPS fluid waveform
                     Row(
                         modifier = Modifier.width(wingWidth),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -707,19 +713,18 @@ private fun DynamicIslandRecordingPill(
                                 .clip(CircleShape)
                                 .background(activeColor)
                         )
-                        MurmureFluidWaveform(
-                            barCount = 14,
-                            isProcessing = recState.isProcessing,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(18.dp)
+                        Text(
+                            text = activeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // Center dead-zone: pure #000000 over the physical punch-hole camera lens
+                    // Pure #000000 dead-zone centered over the physical punch-hole camera
                     Spacer(modifier = Modifier.width(cameraDeadZone))
 
-                    // Right Wing (exact width == Left Wing): tabular monospace timer + chevron
                     Row(
                         modifier = Modifier.width(wingWidth),
                         verticalAlignment = Alignment.CenterVertically,
@@ -736,23 +741,33 @@ private fun DynamicIslandRecordingPill(
                         Icon(
                             imageVector = Icons.Rounded.ExpandMore,
                             contentDescription = if (expanded) "Collapse" else "Expand",
-                            tint = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.70f),
+                            tint = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.68f),
                             modifier = Modifier.size(14.dp)
                         )
                     }
                 }
 
-                // Expanded controls drop cleanly BELOW the punch-hole camera
+                // Row 2: Extended-notification Murmure fluid 120 FPS waveform directly under the camera lens
+                MurmureFluidWaveform(
+                    barCount = 30,
+                    isProcessing = recState.isProcessing,
+                    modifier = Modifier
+                        .width(islandContentWidth)
+                        .height(22.dp)
+                        .padding(bottom = 8.dp)
+                )
+
+                // Row 3 (Expanded): Quick actions below the waveform
                 if (expanded) {
                     HorizontalDivider(
                         color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.10f),
                         thickness = 1.dp,
-                        modifier = Modifier.width(wingWidth * 2 + cameraDeadZone)
+                        modifier = Modifier.width(islandContentWidth)
                     )
                     Row(
                         modifier = Modifier
-                            .width(wingWidth * 2 + cameraDeadZone)
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                            .width(islandContentWidth)
+                            .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -1208,14 +1223,6 @@ private fun HeroRecorderCard(recState: RecorderState, onToggleRecord: () -> Unit
                 if (recState.isProcessing) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = OrbAmber)
                 }
-            }
-
-            AnimatedVisibility(visible = recState.isRecording || recState.isProcessing) {
-                WaveformBarCanvas(
-                    levels = recState.levels,
-                    isProcessing = recState.isProcessing,
-                    modifier = Modifier.fillMaxWidth().height(42.dp)
-                )
             }
 
             Button(

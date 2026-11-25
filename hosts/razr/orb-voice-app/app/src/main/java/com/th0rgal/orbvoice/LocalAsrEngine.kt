@@ -43,46 +43,53 @@ class LocalAsrEngine private constructor(
     val hasSileroVad: Boolean get() = vad != null
     val isHeavyweight: Boolean get() = useLocalQwen3Server
 
-    @Synchronized
+    // CRITICAL: Separate locks for ASR vs Silero VAD!
+    // Sharing a single @Synchronized monitor caused feedVad() on the 32ms audio capture thread
+    // to block for 1,000-1,500ms whenever transcribe() was decoding, freezing the waveform & timer!
+    private val asrLock = Any()
+    private val vadLock = Any()
+
     fun transcribe(samples: FloatArray): String {
         if (samples.size < 3200) return "" // < 200ms
-        return try {
-            val normalized = normalizeQuietAudio(samples)
-            if (useLocalQwen3Server) {
-                return LocalQwen3ServerClient.transcribe(normalized)
-            }
-            val rec = recognizer ?: return ""
-            val t0 = System.nanoTime()
-            val stream = rec.createStream()
-            stream.acceptWaveform(normalized, 16000)
-            rec.decode(stream)
-            var text = rec.getResult(stream).text.trim()
-            stream.release()
-            val ms = (System.nanoTime() - t0) / 1_000_000L
-            Log.d("OrbVoice", "$modelLabel decoded ${samples.size / 16000f}s in ${ms}ms -> ${text.take(60)}")
+        return synchronized(asrLock) {
+            try {
+                val normalized = normalizeQuietAudio(samples)
+                if (useLocalQwen3Server) {
+                    return@synchronized LocalQwen3ServerClient.transcribe(normalized)
+                }
+                val rec = recognizer ?: return@synchronized ""
+                val t0 = System.nanoTime()
+                val stream = rec.createStream()
+                stream.acceptWaveform(normalized, 16000)
+                rec.decode(stream)
+                var text = rec.getResult(stream).text.trim()
+                stream.release()
+                val ms = (System.nanoTime() - t0) / 1_000_000L
+                Log.d("OrbVoice", "$modelLabel decoded ${samples.size / 16000f}s in ${ms}ms -> ${text.take(60)}")
 
-            // Anti-Chinese-bias guard for Qwen3-ASR: when Qwen3 drifts into CJK characters on
-            // short/noisy European speech (and user didn't select zh/ja), immediately re-decode
-            // the same audio with Parakeet-TDT-0.6B-v3 (25 European languages, 0% CJK, ~300ms).
-            val lang = languageHint.lowercase()
-            if (modelLabel.startsWith("Qwen3") &&
-                !lang.startsWith("zh") &&
-                !lang.startsWith("ja") &&
-                containsCjk(text)
-            ) {
-                val ctx = appContext
-                if (ctx != null) {
-                    val fallback = transcribeWithParakeetFallback(ctx, normalized)
-                    if (!fallback.isNullOrBlank()) {
-                        Log.i("OrbVoice", "Qwen3 CJK drift ('$text') -> Parakeet-v3 fallback: '$fallback'")
-                        text = fallback
+                // Anti-Chinese-bias guard for Qwen3-ASR: when Qwen3 drifts into CJK characters on
+                // short/noisy European speech (and user didn't select zh/ja), immediately re-decode
+                // the same audio with Parakeet-TDT-0.6B-v3 (25 European languages, 0% CJK, ~300ms).
+                val lang = languageHint.lowercase()
+                if (modelLabel.startsWith("Qwen3") &&
+                    !lang.startsWith("zh") &&
+                    !lang.startsWith("ja") &&
+                    containsCjk(text)
+                ) {
+                    val ctx = appContext
+                    if (ctx != null) {
+                        val fallback = transcribeWithParakeetFallback(ctx, normalized)
+                        if (!fallback.isNullOrBlank()) {
+                            Log.i("OrbVoice", "Qwen3 CJK drift ('$text') -> Parakeet-v3 fallback: '$fallback'")
+                            text = fallback
+                        }
                     }
                 }
+                text
+            } catch (e: Throwable) {
+                Log.w("OrbVoice", "$modelLabel decode failed: ${e.message}")
+                ""
             }
-            text
-        } catch (e: Throwable) {
-            Log.w("OrbVoice", "$modelLabel decode failed: ${e.message}")
-            ""
         }
     }
 
@@ -108,8 +115,7 @@ class LocalAsrEngine private constructor(
         return FloatArray(samples.size) { (samples[it] * gain).coerceIn(-1f, 1f) }
     }
 
-    @Synchronized
-    fun feedVad(chunk: FloatArray): List<FloatArray> {
+    fun feedVad(chunk: FloatArray): List<FloatArray> = synchronized(vadLock) {
         val v = vad ?: return emptyList()
         v.acceptWaveform(chunk)
         val out = mutableListOf<FloatArray>()
@@ -118,14 +124,14 @@ class LocalAsrEngine private constructor(
             if (seg.samples.isNotEmpty()) out.add(seg.samples.copyOf())
             v.pop()
         }
-        return out
+        out
     }
 
-    @Synchronized
-    fun isSpeechActive(): Boolean = vad?.isSpeechDetected() ?: false
+    fun isSpeechActive(): Boolean = synchronized(vadLock) {
+        vad?.isSpeechDetected() ?: false
+    }
 
-    @Synchronized
-    fun flushVad(): List<FloatArray> {
+    fun flushVad(): List<FloatArray> = synchronized(vadLock) {
         val v = vad ?: return emptyList()
         v.flush()
         val out = mutableListOf<FloatArray>()
@@ -134,17 +140,16 @@ class LocalAsrEngine private constructor(
             if (seg.samples.isNotEmpty()) out.add(seg.samples.copyOf())
             v.pop()
         }
-        return out
+        out
     }
 
-    @Synchronized
-    fun resetVad() {
+    fun resetVad() = synchronized(vadLock) {
         try { vad?.reset() } catch (_: Exception) {}
     }
 
     override fun close() {
-        try { vad?.release() } catch (_: Exception) {}
-        try { recognizer?.release() } catch (_: Exception) {}
+        synchronized(vadLock) { try { vad?.release() } catch (_: Exception) {} }
+        synchronized(asrLock) { try { recognizer?.release() } catch (_: Exception) {} }
     }
 
     enum class AsrModel(val id: String, val label: String) {

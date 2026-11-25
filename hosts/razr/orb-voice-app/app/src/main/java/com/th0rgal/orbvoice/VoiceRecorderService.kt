@@ -216,7 +216,12 @@ class VoiceRecorderService : Service() {
     private var workerThread: Thread? = null
     private var pipeWriterThread: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val asrExecutor = Executors.newSingleThreadExecutor()
+    private val asrExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            r.run()
+        }, "scribe-asr-cpu").apply { isDaemon = true }
+    }
     private val npuExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "scribe-hexagon-npu").apply { isDaemon = true }
     }
