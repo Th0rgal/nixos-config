@@ -632,6 +632,7 @@ class VoiceRecorderService : Service() {
         var earlyClassified = false
         var lastPreviewDecodeMs = 0L
         var lastPreviewTranslateMs = 0L
+        var lastPreviewTranslatedText = ""
         var lastUiTickMs = 0L
         val previewInFlight = AtomicBoolean(false)
         val previewTranslateInFlight = AtomicBoolean(false)
@@ -949,30 +950,30 @@ class VoiceRecorderService : Service() {
                                             activeSpeakerIndex = spk,
                                             partialText = preview
                                         )
-                                        // Live streaming translation while speaking (refined when sentence ends!)
+                                        // Ultra-fast live streaming translation while speaking (~250ms, plain text,
+                                        // refined into full polished translation when the sentence ends!)
                                         val orbCfgPrev = OrbRouterConfig.load(this)
                                         val wantLiveTx = translateModeActive || orbCfgPrev.autoTranslateTarget.isNotBlank()
                                         val nowMs = System.currentTimeMillis() - startTimeMs
                                         if (wantLiveTx &&
-                                            preview.length >= 6 &&
+                                            preview.length >= 4 &&
+                                            preview != lastPreviewTranslatedText &&
                                             orbCfgPrev.isConfigured &&
-                                            nowMs - lastPreviewTranslateMs >= 1100L &&
+                                            nowMs - lastPreviewTranslateMs >= 450L &&
                                             previewTranslateInFlight.compareAndSet(false, true)
                                         ) {
                                             lastPreviewTranslateMs = nowMs
+                                            lastPreviewTranslatedText = preview
                                             val bidirA = if (translateModeActive) translateLangA else null
                                             val bidirB = if (translateModeActive) translateLangB else null
                                             llmExecutor.execute {
                                                 try {
-                                                    val txRes = OrbRouterClient.polishAndTranslateLive(
+                                                    val tx = OrbRouterClient.translatePreviewFast(
                                                         cfg = orbCfgPrev,
-                                                        rawText = preview,
-                                                        recentContext = emptyList(),
-                                                        knownSpeakers = emptyList(),
+                                                        partialText = preview,
                                                         bidirectionalLangA = bidirA,
                                                         bidirectionalLangB = bidirB
-                                                    )
-                                                    val tx = txRes?.translated.orEmpty().trim()
+                                                    ).orEmpty().trim()
                                                     if (tx.isNotBlank() && recording.get() && _state.value.partialText.isNotBlank()) {
                                                         _state.value = _state.value.copy(partialTranslation = tx)
                                                     }

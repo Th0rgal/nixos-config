@@ -95,6 +95,41 @@ object OrbRouterClient {
     }
 
     /**
+     * Ultra-low-latency streaming preview translator (~250ms, plain text only — no JSON overhead).
+     * Used while the speaker is mid-sentence so translated words appear live in real time, then
+     * refined by [polishAndTranslateLive] when the sentence completes.
+     */
+    fun translatePreviewFast(
+        cfg: OrbRouterConfig,
+        partialText: String,
+        bidirectionalLangA: String? = null,
+        bidirectionalLangB: String? = null
+    ): String? {
+        if (!cfg.isConfigured || partialText.length < 3) return null
+        val isBidir = !bidirectionalLangA.isNullOrBlank() && !bidirectionalLangB.isNullOrBlank()
+        val targetLang = cfg.autoTranslateTarget.trim()
+        if (!isBidir && targetLang.isEmpty()) return null
+        val sys = if (isBidir) {
+            "Translate this live speech fragment between $bidirectionalLangA and $bidirectionalLangB (if $bidirectionalLangA -> $bidirectionalLangB; if $bidirectionalLangB -> $bidirectionalLangA). Output ONLY the translation, nothing else."
+        } else {
+            "Translate this live speech fragment into $targetLang. Output ONLY the translation, nothing else."
+        }
+        return try {
+            val raw = chatCompletion(
+                cfg = cfg,
+                model = cfg.fastModel,
+                systemPrompt = sys,
+                userContent = partialText,
+                maxTokens = 120,
+                timeoutMs = 4000
+            )?.trim()
+            raw?.removePrefix("\"")?.removeSuffix("\"")?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Near-real-time sliding-window LLM conversation reconciler:
      * Reviews the last 3-5 committed turns together to fix speaker attribution,
      * merge mid-sentence VAD splits (`mergePrev: true`), and polish ASR typos/punctuation.
