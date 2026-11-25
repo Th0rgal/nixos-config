@@ -1215,62 +1215,94 @@ private fun HeroRecorderCard(recState: RecorderState, onToggleRecord: () -> Unit
     Surface(
         color = OrbSurface,
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (recState.isRecording) OrbRed.copy(alpha = 0.55f) else OrbBorder),
-        modifier = Modifier.fillMaxWidth()
+        border = BorderStroke(1.dp, if (recState.isRecording) OrbRed.copy(alpha = 0.45f) else OrbBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        if (recState.isRecording) {
+            // Compact single-row live bar while recording -> frees +100dp for full bilingual dialogue!
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = when {
-                            recState.isRecording -> "Live · ${VoiceNoteStore.formatTimestamp(recState.elapsedMs)}"
-                            recState.isProcessing -> "Saving & indexing…"
-                            else -> "Audio Notes"
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = OrbFgStrong
-                    )
-                    Text(
                         text = recState.statusMessage,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrbFgMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = OrbFgStrong,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Text(
+                        text = "Live · ${VoiceNoteStore.formatTimestamp(recState.elapsedMs)}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        color = OrbFgMuted
+                    )
                 }
-                if (recState.isProcessing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = OrbAmber)
+                Button(
+                    onClick = onToggleRecord,
+                    enabled = !recState.isProcessing,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = OrbRed,
+                        contentColor = OrbFgStrong
+                    ),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Stop", style = MaterialTheme.typography.labelMedium)
                 }
             }
-
-            Button(
-                onClick = onToggleRecord,
-                enabled = !recState.isProcessing,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (recState.isRecording) OrbRed else OrbFgStrong,
-                    contentColor = if (recState.isRecording) OrbFgStrong else OrbBg
-                ),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                modifier = Modifier.fillMaxWidth().height(48.dp)
+        } else {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(
-                    imageVector = if (recState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (recState.isRecording) "Stop & Save Note" else "Record Audio Note",
-                    style = MaterialTheme.typography.labelLarge
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (recState.isProcessing) "Saving & indexing…" else "Audio Notes",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = OrbFgStrong
+                        )
+                        Text(
+                            text = recState.statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OrbFgMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (recState.isProcessing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = OrbAmber)
+                    }
+                }
+
+                Button(
+                    onClick = onToggleRecord,
+                    enabled = !recState.isProcessing,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = OrbFgStrong,
+                        contentColor = OrbBg
+                    ),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Icon(Icons.Rounded.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Record Audio Note", style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }
@@ -1318,6 +1350,7 @@ private data class SpeakerTurnGroup(
     val endMs: Long,
     val paragraphs: List<String>,
     val translations: List<String> = emptyList(),
+    val isTranslating: Boolean = false,
     val livePartial: String? = null,
     val livePartialTranslation: String? = null
 )
@@ -1333,13 +1366,16 @@ private fun groupConsecutiveSegments(
     val groups = mutableListOf<SpeakerTurnGroup>()
     for (seg in segments) {
         val last = groups.lastOrNull()
-        val tr = seg.translatedText.trim()
+        val rawTr = seg.translatedText.trim()
+        val pendingTx = rawTr == "\u200B" || rawTr == "Translating…"
+        val tr = if (pendingTx) "" else rawTr
         if (last != null && last.speakerIndex == seg.speakerIndex) {
             groups[groups.lastIndex] = last.copy(
                 speakerName = seg.speakerName,
                 endMs = maxOf(last.endMs, seg.endMs),
                 paragraphs = last.paragraphs + seg.text,
-                translations = if (tr.isNotEmpty()) last.translations + tr else last.translations
+                translations = if (tr.isNotEmpty()) last.translations + tr else last.translations,
+                isTranslating = last.isTranslating || pendingTx
             )
         } else {
             groups.add(
@@ -1349,7 +1385,8 @@ private fun groupConsecutiveSegments(
                     startMs = seg.startMs,
                     endMs = seg.endMs,
                     paragraphs = listOf(seg.text),
-                    translations = if (tr.isNotEmpty()) listOf(tr) else emptyList()
+                    translations = if (tr.isNotEmpty()) listOf(tr) else emptyList(),
+                    isTranslating = pendingTx
                 )
             )
         }
@@ -1404,12 +1441,13 @@ private fun LiveTranscriptStream(
         )
     }
 
-    val lastChars = (groups.lastOrNull()?.paragraphs?.sumOf { it.length } ?: 0) + recState.partialText.length
+    val lastChars = (groups.lastOrNull()?.paragraphs?.sumOf { it.length } ?: 0) +
+        (groups.lastOrNull()?.translations?.sumOf { it.length } ?: 0) +
+        recState.partialText.length +
+        recState.partialTranslation.length
     LaunchedEffect(groups.size, recState.liveSegments.size, lastChars) {
         if (groups.isNotEmpty()) {
-            // Scroll to the trailing bottom_anchor item so even a tall multi-sentence speaker card
-            // stays pinned to its latest line at the bottom of the screen.
-            listState.scrollToItem(groups.size)
+            listState.animateScrollToItem(groups.size)
         }
     }
 
@@ -1446,6 +1484,7 @@ private fun LiveTranscriptStream(
                 timestamp = ts,
                 paragraphs = grp.paragraphs,
                 translations = grp.translations,
+                isTranslating = grp.isTranslating,
                 livePartial = grp.livePartial,
                 livePartialTranslation = grp.livePartialTranslation,
                 color = sColor,
@@ -1465,6 +1504,7 @@ private fun SpeakerGroupCard(
     timestamp: String,
     paragraphs: List<String>,
     translations: List<String> = emptyList(),
+    isTranslating: Boolean = false,
     livePartial: String? = null,
     livePartialTranslation: String? = null,
     color: androidx.compose.ui.graphics.Color,
@@ -1521,33 +1561,48 @@ private fun SpeakerGroupCard(
                         )
                     }
                     Text(text = timestamp, style = MaterialTheme.typography.labelSmall, color = OrbFgSubtle)
+                    if (isTranslating) {
+                        Text(
+                            text = "· translating",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OrbBlue
+                        )
+                    }
                 }
-                if (paragraphs.isNotEmpty()) {
+                val hasAnyTranslation = translations.isNotEmpty() || !livePartialTranslation.isNullOrBlank()
+                if (paragraphs.isNotEmpty() || !livePartial.isNullOrBlank()) {
+                    val originalLine = buildString {
+                        if (paragraphs.isNotEmpty()) append(paragraphs.joinToString(" "))
+                        if (!livePartial.isNullOrBlank()) {
+                            if (isNotEmpty()) append(' ')
+                            append(livePartial)
+                            append('▍')
+                        }
+                    }
                     Text(
-                        text = paragraphs.joinToString(" "),
-                        style = if (translations.isNotEmpty()) MaterialTheme.typography.bodySmall else bodyStyle,
-                        color = if (translations.isNotEmpty()) OrbFgMuted else OrbFgStrong
+                        text = originalLine,
+                        style = if (hasAnyTranslation) MaterialTheme.typography.bodySmall else bodyStyle,
+                        color = if (hasAnyTranslation) OrbFgMuted else OrbFgStrong
                     )
                 }
-                if (translations.isNotEmpty()) {
+                if (hasAnyTranslation) {
+                    HorizontalDivider(
+                        color = OrbBorder.copy(alpha = 0.65f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                    val translatedLine = buildString {
+                        if (translations.isNotEmpty()) append(translations.joinToString(" "))
+                        if (!livePartialTranslation.isNullOrBlank()) {
+                            if (isNotEmpty()) append(' ')
+                            append(livePartialTranslation)
+                            append('▍')
+                        }
+                    }
                     Text(
-                        text = "→ ${translations.joinToString(" ")}",
+                        text = translatedLine,
                         style = bodyStyle,
-                        color = OrbFgStrong
-                    )
-                }
-                if (!livePartial.isNullOrBlank()) {
-                    Text(
-                        text = "${livePartial}▍",
-                        style = if (!livePartialTranslation.isNullOrBlank()) MaterialTheme.typography.bodySmall else bodyStyle,
-                        color = OrbFgMuted
-                    )
-                }
-                if (!livePartialTranslation.isNullOrBlank()) {
-                    Text(
-                        text = "→ ${livePartialTranslation}▍",
-                        style = bodyStyle,
-                        color = OrbBlue
+                        color = if (translations.isEmpty()) OrbBlue else OrbFgStrong
                     )
                 }
             }

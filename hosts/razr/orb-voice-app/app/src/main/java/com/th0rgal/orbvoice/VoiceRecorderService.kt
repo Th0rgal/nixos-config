@@ -675,17 +675,22 @@ class VoiceRecorderService : Service() {
                     prev.speakerIndex == speakerIdx &&
                     (tStart - prev.endMs) <= 1200L &&
                     prev.text.length < 45 &&
-                    prev.text.lastOrNull() !in charArrayOf('.', '?', '!')
+                    (prev.text.lastOrNull() ?: ' ') !in charArrayOf('.', '?', '!')
 
                 val updatedList: List<TranscriptSegment>
                 val targetIndex: Int
                 val effectiveText: String
+                // Carry forward any already-streamed partialTranslation seamlessly so the UI never flashes
+                // a jarring "Translating..." placeholder over text the user was already reading!
+                val carriedTx = if (translateModeActive) {
+                    cur.partialTranslation.trim().ifEmpty { "\u200B" } // zero-width sentinel = refining badge in header
+                } else ""
                 if (shouldAutoMerge && prev != null) {
                     effectiveText = "${prev.text.trimEnd()} $text"
                     val mergedSeg = prev.copy(
                         endMs = tEnd,
                         text = effectiveText,
-                        translatedText = if (translateModeActive) "Translating…" else prev.translatedText
+                        translatedText = if (translateModeActive) carriedTx.ifEmpty { prev.translatedText } else prev.translatedText
                     )
                     updatedList = cur.liveSegments.dropLast(1) + mergedSeg
                     targetIndex = updatedList.lastIndex
@@ -697,7 +702,7 @@ class VoiceRecorderService : Service() {
                         startMs = tStart,
                         endMs = tEnd,
                         text = text,
-                        translatedText = if (translateModeActive) "Translating…" else ""
+                        translatedText = carriedTx
                     )
                     updatedList = cur.liveSegments + newSeg
                     targetIndex = updatedList.lastIndex
@@ -778,7 +783,7 @@ class VoiceRecorderService : Service() {
                                     text = res.cleaned,
                                     translatedText = res.translated
                                 )
-                            } else if (existingSeg.translatedText == "Translating…") {
+                            } else if (existingSeg.translatedText == "\u200B" || existingSeg.translatedText == "Translating…") {
                                 copy[targetIndex] = existingSeg.copy(translatedText = "")
                             }
                             _state.value = nowState.copy(liveSegments = copy)
