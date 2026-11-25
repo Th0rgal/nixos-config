@@ -487,13 +487,30 @@ private fun OrbVoiceApp(
                 shareFile(note.audioPath, mime, "Share Audio Recording")
             },
             onDeepAudioPolish = {
-                if (!orbCfg.isConfigured) {
-                    showSettings = true
-                    showNotice("Set your Orb Router API key in Settings first")
-                    return@NoteDetailSheet
-                }
                 deepPolishingNoteId = note.id
                 scope.launch {
+                    val localReady = withContext(Dispatchers.IO) { LocalQwen3ServerClient.isHealthy() }
+                    if (localReady) {
+                        val localRes = withContext(Dispatchers.IO) {
+                            LocalQwen3ServerClient.deepPolishNoteLocally(note)
+                        }
+                        deepPolishingNoteId = null
+                        localRes.fold(
+                            onSuccess = { updated ->
+                                withContext(Dispatchers.IO) { VoiceNoteStore.saveNote(context, updated) }
+                                reloadNotes()
+                                showNotice("Local Deep Polish complete (Qwen3-1.7B IQ4_XS · 4.4% WER)")
+                            },
+                            onFailure = { err -> showNotice("Local polish failed: ${err.message}") }
+                        )
+                        return@launch
+                    }
+                    if (!orbCfg.isConfigured) {
+                        deepPolishingNoteId = null
+                        showSettings = true
+                        showNotice("Start local Qwen3-1.7B or set Orb Router API key in Settings")
+                        return@launch
+                    }
                     val res = withContext(Dispatchers.IO) {
                         OrbRouterClient.deepAudioRetranscribe(orbCfg, note)
                     }
@@ -1901,12 +1918,12 @@ private fun SettingsModalSheet(
             ) {
                 val rows = listOf(
                     listOf(
-                        LocalAsrEngine.AsrModel.QWEN3_1_7B_LORA.id to "Qwen3 1.7B LoRA\n#1 Tech · 4.4% WER",
-                        LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nFast Live · Noisy"
+                        LocalAsrEngine.AsrModel.PARAKEET_NPU.id to "Parakeet 0.6B NPU\n70ms · V79 NPU",
+                        LocalAsrEngine.AsrModel.QWEN3_0_6B.id to "Qwen3 0.6B\n30+ Auto-Lang"
                     ),
                     listOf(
-                        LocalAsrEngine.AsrModel.QWEN3_0_6B.id to "Qwen3 0.6B\n30+ Auto-Lang",
-                        LocalAsrEngine.AsrModel.PARAKEET_V3.id to "Parakeet 0.6B\n18× Ultra-Fast"
+                        LocalAsrEngine.AsrModel.COHERE_2B.id to "Cohere 2B\nFast Live · Noisy",
+                        LocalAsrEngine.AsrModel.QWEN3_1_7B_LORA.id to "Qwen3 1.7B Local\n4.4% WER · IQ4_XS"
                     )
                 )
                 rows.forEach { pair ->

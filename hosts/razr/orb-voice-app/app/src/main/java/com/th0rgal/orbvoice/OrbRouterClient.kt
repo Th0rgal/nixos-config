@@ -18,7 +18,7 @@ data class OrbRouterConfig(
     val autoTranslateTarget: String = "",
     val translateLangA: String = "English",
     val translateLangB: String = "French",
-    val localAsrModel: String = LocalAsrEngine.AsrModel.QWEN3_0_6B.id
+    val localAsrModel: String = LocalAsrEngine.AsrModel.PARAKEET_NPU.id
 ) {
     val isConfigured: Boolean get() = baseUrl.isNotBlank() && apiKey.isNotBlank()
 
@@ -39,8 +39,8 @@ data class OrbRouterConfig(
                 autoTranslateTarget = prefs.getString("orb_router_auto_translate", "") ?: "",
                 translateLangA = prefs.getString("orb_translate_lang_a", "English") ?: "English",
                 translateLangB = prefs.getString("orb_translate_lang_b", "French") ?: "French",
-                localAsrModel = prefs.getString("local_asr_model", LocalAsrEngine.AsrModel.COHERE_2B.id)
-                    ?: LocalAsrEngine.AsrModel.COHERE_2B.id
+                localAsrModel = prefs.getString("local_asr_model", LocalAsrEngine.AsrModel.PARAKEET_NPU.id)
+                    ?: LocalAsrEngine.AsrModel.PARAKEET_NPU.id
             )
         }
 
@@ -54,7 +54,7 @@ data class OrbRouterConfig(
                 .putString("orb_router_auto_translate", cfg.autoTranslateTarget.trim())
                 .putString("orb_translate_lang_a", cfg.translateLangA.trim().ifEmpty { "English" })
                 .putString("orb_translate_lang_b", cfg.translateLangB.trim().ifEmpty { "French" })
-                .putString("local_asr_model", cfg.localAsrModel.trim().ifEmpty { LocalAsrEngine.AsrModel.COHERE_2B.id })
+                .putString("local_asr_model", cfg.localAsrModel.trim().ifEmpty { LocalAsrEngine.AsrModel.PARAKEET_NPU.id })
                 .apply()
         }
     }

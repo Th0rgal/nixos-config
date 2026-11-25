@@ -125,6 +125,49 @@ object LocalQwen3ServerClient {
         return s
     }
 
+    /**
+     * 100% local post-recording Deep Polish using the unbiased `Qwen3-ASR 1.7B IQ4_XS` (4.42% WER)
+     * running on SideSystem `127.0.0.1:8089` (zero cloud!). Slices the note's WAV audio by speaker
+     * turn and re-transcribes each segment with high accuracy + shared Murmure/Scribe TextPipeline.
+     */
+    fun deepPolishNoteLocally(note: VoiceNote, baseUrl: String = DEFAULT_URL): Result<VoiceNote> {
+        if (!isHealthy(baseUrl)) {
+            return Result.failure(IllegalStateException("Local Qwen3-1.7B server not running on $baseUrl"))
+        }
+        val wavFile = java.io.File(note.audioPath)
+        if (!wavFile.canRead() || !wavFile.name.endsWith(".wav", ignoreCase = true)) {
+            return Result.failure(IllegalStateException("Local Deep Polish requires WAV audio (${wavFile.name})"))
+        }
+        return runCatching {
+            val allBytes = wavFile.readBytes()
+            if (allBytes.size <= 44) error("Empty WAV file")
+            val pcmLen = (allBytes.size - 44) / 2
+            val allFloats = FloatArray(pcmLen)
+            for (i in 0 until pcmLen) {
+                val lo = allBytes[44 + i * 2].toInt() and 0xFF
+                val hi = allBytes[44 + i * 2 + 1].toInt()
+                val s = (hi shl 8) or lo
+                allFloats[i] = s / 32768f
+            }
+            val polishedSegments = note.segments.map { seg ->
+                val startSample = ((seg.startMs * 16L) - 1600L).toInt().coerceIn(0, pcmLen)
+                val endSample = ((seg.endMs * 16L) + 1600L).toInt().coerceIn(startSample, pcmLen)
+                if (endSample - startSample < 3200) {
+                    seg
+                } else {
+                    val slice = allFloats.copyOfRange(startSample, endSample)
+                    val re = transcribe(slice, baseUrl)
+                    val clean = TextPipeline.process(null, re)
+                    if (clean.isNotBlank()) seg.copy(text = clean) else seg
+                }
+            }
+            note.copy(
+                segments = polishedSegments,
+                engineUsed = "Local Deep Polish · Qwen3-1.7B IQ4_XS"
+            )
+        }
+    }
+
     private fun encodePcm16Wav(samples: FloatArray, sampleRate: Int): ByteArray {
         val dataSize = samples.size * 2
         val out = ByteArrayOutputStream(44 + dataSize)

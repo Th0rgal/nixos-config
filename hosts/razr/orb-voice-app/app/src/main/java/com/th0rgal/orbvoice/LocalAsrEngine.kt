@@ -36,6 +36,7 @@ class LocalAsrEngine private constructor(
     private val vad: Vad?,
     val modelLabel: String,
     private val useLocalQwen3Server: Boolean = false,
+    private val parakeetNpu: ParakeetNpuEngine? = null,
     private val appContext: Context? = null,
     private val languageHint: String = "en"
 ) : Closeable {
@@ -54,8 +55,12 @@ class LocalAsrEngine private constructor(
         return synchronized(asrLock) {
             try {
                 val normalized = normalizeQuietAudio(samples)
+                if (parakeetNpu != null) {
+                    val npuText = parakeetNpu.transcribe(normalized)
+                    return@synchronized TextPipeline.process(appContext, npuText)
+                }
                 if (useLocalQwen3Server) {
-                    return@synchronized LocalQwen3ServerClient.transcribe(normalized)
+                    return@synchronized TextPipeline.process(appContext, LocalQwen3ServerClient.transcribe(normalized))
                 }
                 val rec = recognizer ?: return@synchronized ""
                 val t0 = System.nanoTime()
@@ -85,7 +90,7 @@ class LocalAsrEngine private constructor(
                         }
                     }
                 }
-                text
+                TextPipeline.process(appContext, text)
             } catch (e: Throwable) {
                 Log.w("OrbVoice", "$modelLabel decode failed: ${e.message}")
                 ""
@@ -149,20 +154,24 @@ class LocalAsrEngine private constructor(
 
     override fun close() {
         synchronized(vadLock) { try { vad?.release() } catch (_: Exception) {} }
-        synchronized(asrLock) { try { recognizer?.release() } catch (_: Exception) {} }
+        synchronized(asrLock) {
+            try { parakeetNpu?.close() } catch (_: Exception) {}
+            try { recognizer?.release() } catch (_: Exception) {}
+        }
     }
 
     enum class AsrModel(val id: String, val label: String) {
+        PARAKEET_NPU("parakeet-npu", "Parakeet 0.6B NPU"),
         QWEN3_0_6B("qwen3-0.6b", "Qwen3-ASR 0.6B"),
         PARAKEET_V3("parakeet", "Parakeet-TDT 0.6B v3"),
         COHERE_2B("cohere", "Cohere Transcribe 2B"),
-        QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B LoRA"),
+        QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B Local"),
         CANARY_1B("canary-1b", "Canary-1B v2"),
         QWEN3_1_7B("qwen3-1.7b", "Qwen3-ASR 1.7B"),
         WHISPER_TURBO("whisper", "Whisper Large-v3 Turbo");
 
         companion object {
-            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: QWEN3_0_6B
+            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: PARAKEET_NPU
         }
     }
 
@@ -367,17 +376,38 @@ class LocalAsrEngine private constructor(
 
         private fun createSpecific(context: Context, model: AsrModel, languageHint: String): LocalAsrEngine? {
             val t0 = System.nanoTime()
+            if (model == AsrModel.PARAKEET_NPU) {
+                val npu = ParakeetNpuEngine.create(context) ?: return null
+                val vad = createSileroVad(context)
+                val ms = (System.nanoTime() - t0) / 1_000_000L
+                Log.i("OrbVoice", "Parakeet-TDT-0.6B-v3 Hexagon V79 NPU ready in ${ms}ms (SileroVAD=${vad != null})")
+                return LocalAsrEngine(
+                    recognizer = null,
+                    vad = vad,
+                    modelLabel = model.label,
+                    parakeetNpu = npu,
+                    appContext = context.applicationContext,
+                    languageHint = languageHint
+                )
+            }
             if (model == AsrModel.QWEN3_1_7B_LORA) {
                 if (!LocalQwen3ServerClient.isHealthy()) {
-                    Log.i("OrbVoice", "Local Qwen3-1.7B-LoRA llama-server not running on 127.0.0.1:8089; falling back")
+                    Log.i("OrbVoice", "Local Qwen3-1.7B daemon not running on 127.0.0.1:8089; falling back")
                     return null
                 }
                 val vad = createSileroVad(context)
-                Log.i("OrbVoice", "Connected to local Qwen3 1.7B LoRA daemon on 127.0.0.1:8089 (SileroVAD=${vad != null})")
-                return LocalAsrEngine(recognizer = null, vad = vad, modelLabel = model.label, useLocalQwen3Server = true)
+                Log.i("OrbVoice", "Connected to local Qwen3 1.7B daemon on 127.0.0.1:8089 (SileroVAD=${vad != null})")
+                return LocalAsrEngine(
+                    recognizer = null,
+                    vad = vad,
+                    modelLabel = model.label,
+                    useLocalQwen3Server = true,
+                    appContext = context.applicationContext,
+                    languageHint = languageHint
+                )
             }
             val modelCfg = when (model) {
-                AsrModel.QWEN3_1_7B_LORA -> return null
+                AsrModel.PARAKEET_NPU, AsrModel.QWEN3_1_7B_LORA -> return null
                 AsrModel.COHERE_2B -> {
                     val dir = findCohereDir(context) ?: return null
                     val lang = languageHint.lowercase().take(2).ifBlank { "en" }
