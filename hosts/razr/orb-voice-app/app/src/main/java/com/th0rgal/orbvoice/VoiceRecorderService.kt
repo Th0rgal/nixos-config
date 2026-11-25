@@ -611,8 +611,7 @@ class VoiceRecorderService : Service() {
                 )
                 // A) Rolling live Orb Router autocorrect + auto-translate / bidirectional translate in parallel
                 val orbCfg = OrbRouterConfig.load(this)
-                val shouldRunLlm = orbCfg.isConfigured &&
-                    (translateModeActive || orbCfg.autoTranslateTarget.isNotBlank() || orbCfg.livePolishEnabled) &&
+                val shouldRunLlm = (translateModeActive || orbCfg.autoTranslateTarget.isNotBlank() || orbCfg.livePolishEnabled) &&
                     text.length >= 2
                 if (shouldRunLlm) {
                     val ctxSnap = updatedList.dropLast(1).takeLast(3)
@@ -620,16 +619,18 @@ class VoiceRecorderService : Service() {
                     val bidirA = if (translateModeActive) translateLangA else null
                     val bidirB = if (translateModeActive) translateLangB else null
                     llmExecutor.execute {
-                        var res = OrbRouterClient.polishAndTranslateLive(
-                            cfg = orbCfg,
-                            rawText = text,
-                            recentContext = ctxSnap,
-                            knownSpeakers = namesSnap,
-                            bidirectionalLangA = bidirA,
-                            bidirectionalLangB = bidirB
-                        )
+                        var res = if (orbCfg.isConfigured) {
+                            OrbRouterClient.polishAndTranslateLive(
+                                cfg = orbCfg,
+                                rawText = text,
+                                recentContext = ctxSnap,
+                                knownSpeakers = namesSnap,
+                                bidirectionalLangA = bidirA,
+                                bidirectionalLangB = bidirB
+                            )
+                        } else null
                         // One quick retry if bidirectional translation came back empty
-                        if (translateModeActive && (res == null || res.translated.isBlank())) {
+                        if (orbCfg.isConfigured && translateModeActive && (res == null || res.translated.isBlank())) {
                             res = OrbRouterClient.polishAndTranslateLive(
                                 cfg = orbCfg,
                                 rawText = text,
@@ -638,6 +639,35 @@ class VoiceRecorderService : Service() {
                                 bidirectionalLangA = bidirA,
                                 bidirectionalLangB = bidirB
                             )
+                        }
+                        // 100% OFFLINE airplane-mode fallback via NVIDIA Canary-1B-v2 if Orb Router is unreachable!
+                        if (res == null || (translateModeActive && res.translated.isBlank())) {
+                            val targetLang = when {
+                                translateModeActive -> {
+                                    // Heuristic: if text has French accents/common French words, translate A/B accordingly
+                                    val looksFr = Regex("\\b(je|tu|il|elle|nous|vous|est|c'est|le|la|les|des|une|que|qui|mais|pour|avec|dans|pas)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
+                                        text.any { it in "éèêëàâùûçôîï" }
+                                    if (looksFr && translateLangA.equals("French", true)) translateLangB
+                                    else if (looksFr && translateLangB.equals("French", true)) translateLangA
+                                    else if (translateLangA.equals("English", true)) translateLangB
+                                    else translateLangA
+                                }
+                                orbCfg.autoTranslateTarget.isNotBlank() -> orbCfg.autoTranslateTarget
+                                else -> ""
+                            }
+                            if (targetLang.isNotBlank()) {
+                                val srcLang = if (translateModeActive) {
+                                    if (targetLang.equals(translateLangA, true)) translateLangB else translateLangA
+                                } else {
+                                    if (targetLang.equals("English", true)) "French" else "English"
+                                }
+                                val offlineTx = LocalAsrEngine.translateSpeechOffline(
+                                    applicationContext, segFloats, srcLang, targetLang
+                                )
+                                if (!offlineTx.isNullOrBlank()) {
+                                    res = LivePolishResult(cleaned = res?.cleaned ?: text, translated = "$offlineTx (offline)")
+                                }
+                            }
                         }
                         val nowState = _state.value
                         if (targetIndex < nowState.liveSegments.size) {
