@@ -18,7 +18,7 @@ data class OrbRouterConfig(
     val autoTranslateTarget: String = "",
     val translateLangA: String = "English",
     val translateLangB: String = "French",
-    val localAsrModel: String = LocalAsrEngine.AsrModel.QWEN3_1_7B_LORA.id
+    val localAsrModel: String = LocalAsrEngine.AsrModel.QWEN3_0_6B.id
 ) {
     val isConfigured: Boolean get() = baseUrl.isNotBlank() && apiKey.isNotBlank()
 

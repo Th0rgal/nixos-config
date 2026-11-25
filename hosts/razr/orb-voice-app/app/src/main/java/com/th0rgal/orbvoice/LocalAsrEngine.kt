@@ -127,16 +127,16 @@ class LocalAsrEngine private constructor(
     }
 
     enum class AsrModel(val id: String, val label: String) {
-        QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B LoRA"),
         QWEN3_0_6B("qwen3-0.6b", "Qwen3-ASR 0.6B"),
         PARAKEET_V3("parakeet", "Parakeet-TDT 0.6B v3"),
         COHERE_2B("cohere", "Cohere Transcribe 2B"),
+        QWEN3_1_7B_LORA("qwen3-lora", "Qwen3 1.7B LoRA"),
         CANARY_1B("canary-1b", "Canary-1B v2"),
         QWEN3_1_7B("qwen3-1.7b", "Qwen3-ASR 1.7B"),
         WHISPER_TURBO("whisper", "Whisper Large-v3 Turbo");
 
         companion object {
-            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: QWEN3_1_7B_LORA
+            fun fromId(id: String?): AsrModel = entries.firstOrNull { it.id == id } ?: QWEN3_0_6B
         }
     }
 
@@ -353,7 +353,7 @@ class LocalAsrEngine private constructor(
                             seed = 42,
                             hotwords = ""
                         ),
-                        numThreads = 6,
+                        numThreads = 4,
                         debug = false,
                         provider = "cpu"
                     )
@@ -367,7 +367,7 @@ class LocalAsrEngine private constructor(
                             joiner = File(dir, "joiner.int8.onnx").absolutePath
                         ),
                         tokens = File(dir, "tokens.txt").absolutePath,
-                        numThreads = 6,
+                        numThreads = 4,
                         debug = false,
                         provider = "cpu",
                         modelType = "nemo_transducer"

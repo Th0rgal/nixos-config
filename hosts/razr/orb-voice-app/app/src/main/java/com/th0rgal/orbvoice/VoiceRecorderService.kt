@@ -580,13 +580,6 @@ class VoiceRecorderService : Service() {
             val segShorts = ShortArray(segFloats.size) { i ->
                 (segFloats[i] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
-            // Show subtle live activity on the speaker's card immediately so the UI feels responsive
-            if (_state.value.partialText.isBlank()) {
-                _state.value = _state.value.copy(
-                    activeSpeakerIndex = _state.value.activeSpeakerIndex ?: currentSpeakerIndex,
-                    partialText = "…"
-                )
-            }
             // True NPU + CPU pipelining: dispatch WeSpeaker ResNet293-LM on Hexagon V79 NPU (~12ms)
             // concurrently while 6-core Oryon CPU decodes ASR, hiding 100% of diarization latency!
             val speakerFuture = npuExecutor.submit<Int> {
