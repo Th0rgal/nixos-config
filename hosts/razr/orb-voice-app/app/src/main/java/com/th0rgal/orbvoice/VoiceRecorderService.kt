@@ -736,20 +736,47 @@ class VoiceRecorderService : Service() {
                             inTurn = true
                             turnStartMs = elapsed
                             currentTurnStartMs = elapsed
+                            earlyClassified = false
                             turnLen = 0
                         }
                         appendTurn(chunk, read)
-                        // Live streaming preview every ~1.4s while speaking
+                        // Fast Hexagon V79 NPU early speaker probe (~500ms, 12ms NPU inference!)
+                        // Switches activeSpeakerIndex BEFORE the first live preview renders so a new
+                        // speaker's words never appear under the previous speaker's card.
+                        if (!earlyClassified && turnLen >= SAMPLE_RATE / 2) {
+                            earlyClassified = true
+                            val probe = turnBuf.copyOf(turnLen)
+                            npuExecutor.execute {
+                                if (!recording.get()) return@execute
+                                val spk = tracker.classifyTurn(probe, allowNewSpeaker = false)
+                                currentSpeakerIndex = spk
+                                _state.value = _state.value.copy(activeSpeakerIndex = spk)
+                            }
+                        }
+                        // Live streaming preview every ~1.4s while speaking — also classifies brand-new
+                        // unseen speakers on the 12ms Hexagon V79 NPU in parallel with ASR preview!
                         if (elapsed - lastPreviewDecodeMs >= 1400L && turnLen >= SAMPLE_RATE / 2) {
                             lastPreviewDecodeMs = elapsed
                             val snapLen = turnLen
-                            val snapFloats = FloatArray(snapLen) { turnBuf[it] / 32768f }
+                            val snapShorts = turnBuf.copyOf(snapLen)
+                            val snapFloats = FloatArray(snapLen) { snapShorts[it] / 32768f }
+                            val previewSpkFuture = if (snapLen >= (SAMPLE_RATE * 9) / 10) {
+                                npuExecutor.submit<Int> {
+                                    tracker.classifyTurn(snapShorts, allowNewSpeaker = true)
+                                }
+                            } else null
                             asrExecutor.execute {
                                 if (!recording.get()) return@execute
                                 val preview = localAsr.transcribe(snapFloats)
+                                val spk = try {
+                                    previewSpkFuture?.get() ?: currentSpeakerIndex
+                                } catch (_: Exception) {
+                                    currentSpeakerIndex
+                                }
+                                currentSpeakerIndex = spk
                                 if (preview.isNotBlank() && recording.get()) {
                                     _state.value = _state.value.copy(
-                                        activeSpeakerIndex = _state.value.activeSpeakerIndex ?: currentSpeakerIndex,
+                                        activeSpeakerIndex = spk,
                                         partialText = preview
                                     )
                                 }
@@ -760,6 +787,7 @@ class VoiceRecorderService : Service() {
                         val segDurMs = (segFloats.size * 1000L) / SAMPLE_RATE
                         val tStart = (elapsed - segDurMs).coerceAtLeast(0L)
                         inTurn = false
+                        earlyClassified = false
                         turnLen = 0
                         submitParakeetTurn(segFloats, tStart, elapsed)
                     }
