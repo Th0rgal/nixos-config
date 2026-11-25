@@ -565,6 +565,7 @@ class VoiceRecorderService : Service() {
         var noiseFloor = 0.008f
         var earlyClassified = false
         var lastPreviewDecodeMs = 0L
+        var lastUiTickMs = 0L
         val previewInFlight = AtomicBoolean(false)
         lastCommittedSpeechText = ""
         currentSpeakerIndex = 0
@@ -578,6 +579,13 @@ class VoiceRecorderService : Service() {
             if (localAsr == null || segFloats.size < SAMPLE_RATE / 4) return
             val segShorts = ShortArray(segFloats.size) { i ->
                 (segFloats[i] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+            }
+            // Show subtle live activity on the speaker's card immediately so the UI feels responsive
+            if (_state.value.partialText.isBlank()) {
+                _state.value = _state.value.copy(
+                    activeSpeakerIndex = _state.value.activeSpeakerIndex ?: currentSpeakerIndex,
+                    partialText = "…"
+                )
             }
             // True NPU + CPU pipelining: dispatch WeSpeaker ResNet293-LM on Hexagon V79 NPU (~12ms)
             // concurrently while 6-core Oryon CPU decodes ASR, hiding 100% of diarization latency!
@@ -796,11 +804,15 @@ class VoiceRecorderService : Service() {
                         turnLen = 0
                         submitParakeetTurn(segFloats, tStart, elapsed)
                     }
-                    _state.value = _state.value.copy(
-                        isRecording = true,
-                        elapsedMs = elapsed,
-                        levels = levelsWindow.toList()
-                    )
+                    // Throttle waveform + elapsed timer UI updates to 5 Hz (every 200ms) for silky 120fps scrolling
+                    if (elapsed - lastUiTickMs >= 200L) {
+                        lastUiTickMs = elapsed
+                        _state.value = _state.value.copy(
+                            isRecording = true,
+                            elapsedMs = elapsed,
+                            levels = levelsWindow.toList()
+                        )
+                    }
                     continue
                 }
 

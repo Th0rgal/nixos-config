@@ -273,7 +273,7 @@ class LocalAsrEngine private constructor(
                     sileroVadModelConfig = SileroVadModelConfig(
                         model = vadFile.absolutePath,
                         threshold = 0.25f,
-                        minSilenceDuration = 0.65f,
+                        minSilenceDuration = 0.55f,
                         minSpeechDuration = 0.20f,
                         windowSize = 512,
                         maxSpeechDuration = 12.0f
