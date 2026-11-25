@@ -54,6 +54,7 @@ data class RecorderState(
     val activeSpeakerIndex: Int? = null,
     val liveSegments: List<TranscriptSegment> = emptyList(),
     val partialText: String = "",
+    val partialTranslation: String = "",
     val speakerNames: Map<Int, String> = emptyMap(),
     val lastCompletedNoteId: String? = null
 )
@@ -630,8 +631,12 @@ class VoiceRecorderService : Service() {
         var noiseFloor = 0.008f
         var earlyClassified = false
         var lastPreviewDecodeMs = 0L
+        var lastPreviewTranslateMs = 0L
         var lastUiTickMs = 0L
         val previewInFlight = AtomicBoolean(false)
+        val previewTranslateInFlight = AtomicBoolean(false)
+        val reconcileInFlight = AtomicBoolean(false)
+        var lastReconciledCount = 0
         lastCommittedSpeechText = ""
         currentSpeakerIndex = 0
         currentTurnStartMs = 0L
@@ -661,25 +666,53 @@ class VoiceRecorderService : Service() {
                 currentSpeakerIndex = speakerIdx
                 val cur = _state.value
                 val spkName = cur.speakerNames[speakerIdx] ?: "Speaker ${speakerIdx + 1}"
-                val newSeg = TranscriptSegment(
-                    speakerIndex = speakerIdx,
-                    speakerName = spkName,
-                    startMs = tStart,
-                    endMs = tEnd,
-                    text = text,
-                    translatedText = if (translateModeActive) "Translating…" else ""
-                )
-                val updatedList = cur.liveSegments + newSeg
-                val targetIndex = updatedList.lastIndex
+
+                // Smart same-speaker fragment auto-merge: if the same speaker resumes within 1.2s
+                // after an unfinished short fragment (< 45 chars, no terminal .?!), merge into it
+                // instead of splitting a single sentence across two cards.
+                val prev = cur.liveSegments.lastOrNull()
+                val shouldAutoMerge = prev != null &&
+                    prev.speakerIndex == speakerIdx &&
+                    (tStart - prev.endMs) <= 1200L &&
+                    prev.text.length < 45 &&
+                    prev.text.lastOrNull() !in charArrayOf('.', '?', '!')
+
+                val updatedList: List<TranscriptSegment>
+                val targetIndex: Int
+                val effectiveText: String
+                if (shouldAutoMerge && prev != null) {
+                    effectiveText = "${prev.text.trimEnd()} $text"
+                    val mergedSeg = prev.copy(
+                        endMs = tEnd,
+                        text = effectiveText,
+                        translatedText = if (translateModeActive) "Translating…" else prev.translatedText
+                    )
+                    updatedList = cur.liveSegments.dropLast(1) + mergedSeg
+                    targetIndex = updatedList.lastIndex
+                } else {
+                    effectiveText = text
+                    val newSeg = TranscriptSegment(
+                        speakerIndex = speakerIdx,
+                        speakerName = spkName,
+                        startMs = tStart,
+                        endMs = tEnd,
+                        text = text,
+                        translatedText = if (translateModeActive) "Translating…" else ""
+                    )
+                    updatedList = cur.liveSegments + newSeg
+                    targetIndex = updatedList.lastIndex
+                }
+
                 _state.value = cur.copy(
                     activeSpeakerIndex = speakerIdx,
                     partialText = "",
+                    partialTranslation = "",
                     liveSegments = updatedList
                 )
                 // A) Rolling live Orb Router autocorrect + auto-translate / bidirectional translate in parallel
                 val orbCfg = OrbRouterConfig.load(this)
                 val shouldRunLlm = (translateModeActive || orbCfg.autoTranslateTarget.isNotBlank() || orbCfg.livePolishEnabled) &&
-                    text.length >= 2
+                    effectiveText.length >= 2
                 if (shouldRunLlm) {
                     val ctxSnap = updatedList.dropLast(1).takeLast(3)
                     val namesSnap = cur.speakerNames.values.toList()
@@ -689,7 +722,7 @@ class VoiceRecorderService : Service() {
                         var res = if (orbCfg.isConfigured) {
                             OrbRouterClient.polishAndTranslateLive(
                                 cfg = orbCfg,
-                                rawText = text,
+                                rawText = effectiveText,
                                 recentContext = ctxSnap,
                                 knownSpeakers = namesSnap,
                                 bidirectionalLangA = bidirA,
@@ -700,7 +733,7 @@ class VoiceRecorderService : Service() {
                         if (orbCfg.isConfigured && translateModeActive && (res == null || res.translated.isBlank())) {
                             res = OrbRouterClient.polishAndTranslateLive(
                                 cfg = orbCfg,
-                                rawText = text,
+                                rawText = effectiveText,
                                 recentContext = emptyList(),
                                 knownSpeakers = namesSnap,
                                 bidirectionalLangA = bidirA,
@@ -712,8 +745,8 @@ class VoiceRecorderService : Service() {
                             val targetLang = when {
                                 translateModeActive -> {
                                     // Heuristic: if text has French accents/common French words, translate A/B accordingly
-                                    val looksFr = Regex("\\b(je|tu|il|elle|nous|vous|est|c'est|le|la|les|des|une|que|qui|mais|pour|avec|dans|pas)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) ||
-                                        text.any { it in "éèêëàâùûçôîï" }
+                                    val looksFr = Regex("\\b(je|tu|il|elle|nous|vous|est|c'est|le|la|les|des|une|que|qui|mais|pour|avec|dans|pas)\\b", RegexOption.IGNORE_CASE).containsMatchIn(effectiveText) ||
+                                        effectiveText.any { it in "éèêëàâùûçôîï" }
                                     if (looksFr && translateLangA.equals("French", true)) translateLangB
                                     else if (looksFr && translateLangB.equals("French", true)) translateLangA
                                     else if (translateLangA.equals("English", true)) translateLangB
@@ -732,7 +765,7 @@ class VoiceRecorderService : Service() {
                                     applicationContext, segFloats, srcLang, targetLang
                                 )
                                 if (!offlineTx.isNullOrBlank()) {
-                                    res = LivePolishResult(cleaned = res?.cleaned ?: text, translated = "$offlineTx (offline)")
+                                    res = LivePolishResult(cleaned = res?.cleaned ?: effectiveText, translated = "$offlineTx (offline)")
                                 }
                             }
                         }
@@ -749,6 +782,72 @@ class VoiceRecorderService : Service() {
                                 copy[targetIndex] = existingSeg.copy(translatedText = "")
                             }
                             _state.value = nowState.copy(liveSegments = copy)
+                        }
+
+                        // B) Near-real-time sliding-window LLM conversation reconciler:
+                        // Every 2 committed turns, review the last 4 turns together to fix speaker
+                        // attribution, merge mid-sentence VAD splits, and polish phrasing live!
+                        val postState = _state.value
+                        val totalSegs = postState.liveSegments.size
+                        if (orbCfg.isConfigured &&
+                            orbCfg.livePolishEnabled &&
+                            totalSegs >= 2 &&
+                            totalSegs - lastReconciledCount >= 2 &&
+                            reconcileInFlight.compareAndSet(false, true)
+                        ) {
+                            lastReconciledCount = totalSegs
+                            val winSize = minOf(4, totalSegs)
+                            val winStart = totalSegs - winSize
+                            val windowSnap = postState.liveSegments.subList(winStart, totalSegs).toList()
+                            val startMsKeys = windowSnap.map { it.startMs }
+                            val spkNamesSnap = postState.speakerNames
+                            try {
+                                val reconciled = OrbRouterClient.reconcileRecentTurns(orbCfg, windowSnap, spkNamesSnap)
+                                if (reconciled != null) {
+                                    val latest = _state.value
+                                    val current = latest.liveSegments.toMutableList()
+                                    // Map each reconciled turn back by its startMs timestamp so newer turns stay intact
+                                    val byIdx = reconciled.associateBy { it.index }
+                                    val mergedWindow = mutableListOf<TranscriptSegment>()
+                                    for (wi in windowSnap.indices) {
+                                        val orig = windowSnap[wi]
+                                        val rec = byIdx[wi]
+                                        val spk = rec?.speakerIndex ?: orig.speakerIndex
+                                        val spkLbl = latest.speakerNames[spk] ?: "Speaker ${spk + 1}"
+                                        val txt = rec?.text ?: orig.text
+                                        // Preserve any translation already computed for this segment
+                                        val curMatch = current.firstOrNull { it.startMs == orig.startMs }
+                                        val tr = curMatch?.translatedText ?: orig.translatedText
+                                        if (rec?.mergePrev == true && mergedWindow.isNotEmpty() && mergedWindow.last().speakerIndex == spk) {
+                                            val p = mergedWindow.last()
+                                            val mergedTr = listOf(p.translatedText, tr).filter { it.isNotBlank() && it != "Translating…" }.joinToString(" ")
+                                            mergedWindow[mergedWindow.lastIndex] = p.copy(
+                                                endMs = maxOf(p.endMs, orig.endMs),
+                                                text = "${p.text.trimEnd()} $txt",
+                                                translatedText = mergedTr
+                                            )
+                                        } else {
+                                            mergedWindow.add(
+                                                orig.copy(
+                                                    speakerIndex = spk,
+                                                    speakerName = spkLbl,
+                                                    text = txt,
+                                                    translatedText = tr
+                                                )
+                                            )
+                                        }
+                                    }
+                                    val keySet = startMsKeys.toSet()
+                                    val firstPos = current.indexOfFirst { it.startMs in keySet }
+                                    if (firstPos >= 0) {
+                                        val before = current.subList(0, firstPos)
+                                        val after = current.subList(firstPos, current.size).filter { it.startMs !in keySet }
+                                        _state.value = latest.copy(liveSegments = before + mergedWindow + after)
+                                    }
+                                }
+                            } finally {
+                                reconcileInFlight.set(false)
+                            }
                         }
                     }
                 }
@@ -813,11 +912,11 @@ class VoiceRecorderService : Service() {
                                 _state.value = _state.value.copy(activeSpeakerIndex = spk)
                             }
                         }
-                        // Live streaming preview every ~1.8s while speaking — skipped if a preview is already
-                        // running OR when using the heavyweight Qwen3 1.7B LoRA daemon so final turns never
-                        // queue behind stale previews!
+                        // Live streaming preview: every 650ms on 70ms Hexagon V79 NPU Parakeet (or 1.8s on CPU),
+                        // plus debounced live streaming translation while speaking!
+                        val previewIntervalMs = if (localAsr.isFastNpu) 650L else 1800L
                         if (!localAsr.isHeavyweight &&
-                            elapsed - lastPreviewDecodeMs >= 1800L &&
+                            elapsed - lastPreviewDecodeMs >= previewIntervalMs &&
                             turnLen >= SAMPLE_RATE / 2 &&
                             previewInFlight.compareAndSet(false, true)
                         ) {
@@ -845,6 +944,38 @@ class VoiceRecorderService : Service() {
                                             activeSpeakerIndex = spk,
                                             partialText = preview
                                         )
+                                        // Live streaming translation while speaking (refined when sentence ends!)
+                                        val orbCfgPrev = OrbRouterConfig.load(this)
+                                        val wantLiveTx = translateModeActive || orbCfgPrev.autoTranslateTarget.isNotBlank()
+                                        val nowMs = System.currentTimeMillis() - startTimeMs
+                                        if (wantLiveTx &&
+                                            preview.length >= 6 &&
+                                            orbCfgPrev.isConfigured &&
+                                            nowMs - lastPreviewTranslateMs >= 1100L &&
+                                            previewTranslateInFlight.compareAndSet(false, true)
+                                        ) {
+                                            lastPreviewTranslateMs = nowMs
+                                            val bidirA = if (translateModeActive) translateLangA else null
+                                            val bidirB = if (translateModeActive) translateLangB else null
+                                            llmExecutor.execute {
+                                                try {
+                                                    val txRes = OrbRouterClient.polishAndTranslateLive(
+                                                        cfg = orbCfgPrev,
+                                                        rawText = preview,
+                                                        recentContext = emptyList(),
+                                                        knownSpeakers = emptyList(),
+                                                        bidirectionalLangA = bidirA,
+                                                        bidirectionalLangB = bidirB
+                                                    )
+                                                    val tx = txRes?.translated.orEmpty().trim()
+                                                    if (tx.isNotBlank() && recording.get() && _state.value.partialText.isNotBlank()) {
+                                                        _state.value = _state.value.copy(partialTranslation = tx)
+                                                    }
+                                                } finally {
+                                                    previewTranslateInFlight.set(false)
+                                                }
+                                            }
+                                        }
                                     }
                                 } finally {
                                     previewInFlight.set(false)

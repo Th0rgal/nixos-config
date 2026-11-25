@@ -1318,7 +1318,8 @@ private data class SpeakerTurnGroup(
     val endMs: Long,
     val paragraphs: List<String>,
     val translations: List<String> = emptyList(),
-    val livePartial: String? = null
+    val livePartial: String? = null,
+    val livePartialTranslation: String? = null
 )
 
 private fun groupConsecutiveSegments(
@@ -1326,6 +1327,7 @@ private fun groupConsecutiveSegments(
     activeSpeakerIndex: Int? = null,
     activeSpeakerName: String? = null,
     partialText: String = "",
+    partialTranslation: String = "",
     elapsedMs: Long = 0L
 ): List<SpeakerTurnGroup> {
     val groups = mutableListOf<SpeakerTurnGroup>()
@@ -1356,10 +1358,12 @@ private fun groupConsecutiveSegments(
         val spkIdx = activeSpeakerIndex ?: groups.lastOrNull()?.speakerIndex ?: 0
         val spkName = activeSpeakerName ?: "Speaker ${spkIdx + 1}"
         val last = groups.lastOrNull()
+        val liveTx = partialTranslation.ifBlank { null }
         if (last != null && last.speakerIndex == spkIdx) {
             groups[groups.lastIndex] = last.copy(
                 endMs = maxOf(last.endMs, elapsedMs),
-                livePartial = partialText
+                livePartial = partialText,
+                livePartialTranslation = liveTx
             )
         } else {
             groups.add(
@@ -1369,7 +1373,8 @@ private fun groupConsecutiveSegments(
                     startMs = elapsedMs,
                     endMs = elapsedMs,
                     paragraphs = emptyList(),
-                    livePartial = partialText
+                    livePartial = partialText,
+                    livePartialTranslation = liveTx
                 )
             )
         }
@@ -1388,12 +1393,13 @@ private fun LiveTranscriptStream(
     val listState = rememberLazyListState()
     val activeIdx = recState.activeSpeakerIndex ?: 0
     val activeName = recState.speakerNames[activeIdx] ?: "Speaker ${activeIdx + 1}"
-    val groups = remember(recState.liveSegments, recState.partialText, recState.activeSpeakerIndex, recState.speakerNames) {
+    val groups = remember(recState.liveSegments, recState.partialText, recState.partialTranslation, recState.activeSpeakerIndex, recState.speakerNames) {
         groupConsecutiveSegments(
             segments = recState.liveSegments,
             activeSpeakerIndex = activeIdx,
             activeSpeakerName = activeName,
             partialText = recState.partialText,
+            partialTranslation = recState.partialTranslation,
             elapsedMs = recState.elapsedMs
         )
     }
@@ -1441,6 +1447,7 @@ private fun LiveTranscriptStream(
                 paragraphs = grp.paragraphs,
                 translations = grp.translations,
                 livePartial = grp.livePartial,
+                livePartialTranslation = grp.livePartialTranslation,
                 color = sColor,
                 useSerif = false,
                 onClickSpeaker = { onRenameSpeaker(grp.speakerIndex, grp.speakerName) }
@@ -1459,6 +1466,7 @@ private fun SpeakerGroupCard(
     paragraphs: List<String>,
     translations: List<String> = emptyList(),
     livePartial: String? = null,
+    livePartialTranslation: String? = null,
     color: androidx.compose.ui.graphics.Color,
     useSerif: Boolean,
     onClickSpeaker: () -> Unit
@@ -1531,8 +1539,15 @@ private fun SpeakerGroupCard(
                 if (!livePartial.isNullOrBlank()) {
                     Text(
                         text = "${livePartial}▍",
-                        style = bodyStyle,
+                        style = if (!livePartialTranslation.isNullOrBlank()) MaterialTheme.typography.bodySmall else bodyStyle,
                         color = OrbFgMuted
+                    )
+                }
+                if (!livePartialTranslation.isNullOrBlank()) {
+                    Text(
+                        text = "→ ${livePartialTranslation}▍",
+                        style = bodyStyle,
+                        color = OrbBlue
                     )
                 }
             }

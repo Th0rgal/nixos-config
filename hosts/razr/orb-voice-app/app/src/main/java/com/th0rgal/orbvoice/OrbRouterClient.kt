@@ -60,6 +60,13 @@ data class OrbRouterConfig(
     }
 }
 
+data class ReconciledTurn(
+    val index: Int,
+    val speakerIndex: Int,
+    val text: String,
+    val mergePrev: Boolean
+)
+
 data class LivePolishResult(
     val cleaned: String,
     val translated: String = ""
@@ -85,6 +92,59 @@ object OrbRouterClient {
         if (!obj.has(key) || obj.isNull(key)) return fallback
         val v = obj.optString(key, fallback).trim()
         return if (v.equals("null", ignoreCase = true)) fallback else v
+    }
+
+    /**
+     * Near-real-time sliding-window LLM conversation reconciler:
+     * Reviews the last 3-5 committed turns together to fix speaker attribution,
+     * merge mid-sentence VAD splits (`mergePrev: true`), and polish ASR typos/punctuation.
+     */
+    fun reconcileRecentTurns(
+        cfg: OrbRouterConfig,
+        window: List<TranscriptSegment>,
+        knownSpeakers: Map<Int, String>
+    ): List<ReconciledTurn>? {
+        if (!cfg.isConfigured || !cfg.livePolishEnabled || window.size < 2) return null
+        val speakerList = knownSpeakers.entries.sortedBy { it.key }.joinToString(", ") { "${it.key}=${it.value}" }
+        val lines = window.mapIndexed { idx, seg ->
+            val gapMs = if (idx > 0) (seg.startMs - window[idx - 1].endMs).coerceAtLeast(0L) else 0L
+            "[$idx] speaker=${seg.speakerIndex} (${seg.speakerName}) gap=${gapMs}ms: ${seg.text}"
+        }.joinToString("\n")
+        val systemPrompt = buildString {
+            append("You are a real-time multi-speaker transcript editor. ")
+            append("Given the latest consecutive turns of a live conversation, fix: ")
+            append("1) Misattributed speaker index (only change speaker when context/Q&A/mid-sentence continuation clearly shows the wrong speaker was tagged). ")
+            append("2) Mid-sentence VAD cuts: set \"mergePrev\":true ONLY when turn i is clearly the continuation of turn i-1's unfinished sentence by the same speaker. ")
+            append("3) Minor ASR typos and punctuation in the speaker's original language (keep FR/EN as spoken). ")
+            if (speakerList.isNotBlank()) append("Known speakers: $speakerList. ")
+            append("Return ONLY valid JSON: {\"turns\":[{\"i\":0,\"speaker\":0,\"text\":\"...\",\"mergePrev\":false}]}")
+        }
+        return try {
+            val raw = chatCompletion(
+                cfg = cfg,
+                model = cfg.fastModel,
+                systemPrompt = systemPrompt,
+                userContent = lines,
+                maxTokens = 480,
+                timeoutMs = 8000
+            ) ?: return null
+            val obj = extractJsonObject(raw) ?: return null
+            val arr = obj.optJSONArray("turns") ?: return null
+            val out = mutableListOf<ReconciledTurn>()
+            for (k in 0 until arr.length()) {
+                val item = arr.optJSONObject(k) ?: continue
+                val i = item.optInt("i", k)
+                if (i !in window.indices) continue
+                val spk = item.optInt("speaker", window[i].speakerIndex).coerceAtLeast(0)
+                val txt = safeOptString(item, "text", window[i].text).ifBlank { window[i].text }
+                val merge = item.optBoolean("mergePrev", false) && i > 0
+                out.add(ReconciledTurn(index = i, speakerIndex = spk, text = txt, mergePrev = merge))
+            }
+            out.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Log.w("OrbVoice", "Live reconcile failed: ${e.message}")
+            null
+        }
     }
 
     /**

@@ -43,6 +43,7 @@ class LocalAsrEngine private constructor(
 
     val hasSileroVad: Boolean get() = vad != null
     val isHeavyweight: Boolean get() = useLocalQwen3Server
+    val isFastNpu: Boolean get() = parakeetNpu != null
 
     // CRITICAL: Separate locks for ASR vs Silero VAD!
     // Sharing a single @Synchronized monitor caused feedVad() on the 32ms audio capture thread
@@ -357,10 +358,10 @@ class LocalAsrEngine private constructor(
                     sileroVadModelConfig = SileroVadModelConfig(
                         model = vadFile.absolutePath,
                         threshold = 0.25f,
-                        minSilenceDuration = 0.55f,
+                        minSilenceDuration = 0.85f,
                         minSpeechDuration = 0.20f,
                         windowSize = 512,
-                        maxSpeechDuration = 12.0f
+                        maxSpeechDuration = 18.0f
                     ),
                     sampleRate = 16000,
                     numThreads = 2,
