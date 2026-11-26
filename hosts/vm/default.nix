@@ -50,7 +50,7 @@ in
     bun
     turbo-lean
     orb-desktop
-    folio-desktop
+    scribe-desktop
   ];
 
   fileSystems."/" = {

@@ -237,7 +237,7 @@ in
         "orb"
         "orb-desktop"
       ])
-      folio-desktop
+      scribe-desktop
       rencal
       (agentGit.wrap (
         maybeWrapElectron antigravity-hub [

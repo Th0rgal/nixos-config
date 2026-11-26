@@ -15,7 +15,7 @@
   hindsight = {
     apiUrl = "https://memory.thomas.md";
     bank = "thomas";
-    syncBank = "folio";
+    notesFolder = "scribe";
     notesDir = "/home/thomas/Notes";
   };
 

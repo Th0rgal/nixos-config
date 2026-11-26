@@ -33,7 +33,7 @@ let
     text = ''
       flake="''${REBUILD_FLAKE:-${workDir}/nixos-config}"
       omarchnix="''${REBUILD_OMARCHNIX:-${workDir}/omarchnix}"
-      folio="''${REBUILD_FOLIO:-/home/${user.username}/work/folio}"
+      scribe="''${REBUILD_SCRIBE:-/home/${user.username}/work/scribe}"
       verb=switch
       local_only=0
       locked=0
@@ -74,9 +74,9 @@ let
         fi
         echo "rebuild: using local omarchnix at $omarchnix ($(git -C "$omarchnix" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$omarchnix" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
         overrides=(--override-input omarchnix "path:$omarchnix" --no-write-lock-file)
-        if [ -f "$folio/flake.nix" ]; then
-          echo "rebuild: using local folio at $folio ($(git -C "$folio" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$folio" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
-          overrides+=(--override-input omarchnix/folio "path:$folio")
+        if [ -f "$scribe/flake.nix" ]; then
+          echo "rebuild: using local scribe at $scribe ($(git -C "$scribe" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "$scribe" diff --quiet 2>/dev/null || echo ', dirty'))" >&2
+          overrides+=(--override-input omarchnix/scribe "path:$scribe")
         fi
         if [ "$bump_orb" = 0 ]; then
           orb_ref=$(git ls-remote --exit-code https://github.com/Th0rgal/orb.git refs/heads/master)
