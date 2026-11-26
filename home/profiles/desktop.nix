@@ -329,17 +329,10 @@ in
   '';
 
   wayland.windowManager.hyprland.settings = {
-    # Chromium's native context menus and extension dialogs are translucent
-    # Wayland popups. Keep Hyprland's desktop glass from adding a second blur
-    # and rounded frame around them. This also applies to Helium's transient
-    # Rabby windows when they do map as a toplevel.
+    # Float Helium's modal extension dialogs and Rabby's transient toplevel
+    # popups while letting all Helium windows keep the default desktop
+    # rounding and subtle 1px borders.
     window_rule = lib.mkAfter [
-      {
-        name = "helium-native-popups";
-        match.class = "^helium$";
-        no_blur = true;
-        rounding = 0;
-      }
       {
         name = "helium-extension-dialogs";
         match = {
@@ -361,7 +354,6 @@ in
         size = "400 660";
         stay_focused = true;
         no_blur = true;
-        rounding = 0;
       }
     ];
 
