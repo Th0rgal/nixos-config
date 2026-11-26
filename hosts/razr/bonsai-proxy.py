@@ -18,7 +18,10 @@ BRIDGE_SOCK = os.environ.get("BONSAI_BRIDGE_SOCK", "/var/lib/sidesystem/bridge.s
 MODE = os.environ.get("BONSAI_MODE", "npu")
 IDLE_TIMEOUT = int(os.environ.get("BONSAI_IDLE_TIMEOUT", "180"))
 WAKE_TIMEOUT = int(os.environ.get("BONSAI_WAKE_TIMEOUT", "60"))
-MAX_BATT_TEMP_C = float(os.environ.get("BONSAI_MAX_BATT_C", "46.0"))
+BURST_MAX_BATT_C = float(os.environ.get("BONSAI_BURST_MAX_BATT_C", "40.0"))
+BURST_MAX_SOC_C = float(os.environ.get("BONSAI_BURST_MAX_SOC_C", "68.0"))
+MAX_BATT_TEMP_C = float(os.environ.get("BONSAI_MAX_BATT_C", "45.0"))
+MAX_SOC_TEMP_C = float(os.environ.get("BONSAI_MAX_SOC_C", "85.0"))
 CACHE_DIR = os.environ.get(
     "BONSAI_PROMPT_CACHE_DIR",
     os.path.expanduser("~/bonsai-shootout/prompt-cache"),
@@ -30,6 +33,7 @@ slot_lock = threading.Lock()
 last_activity = time.monotonic()
 active_reqs = 0
 state = "idle"
+thermal_tier = "eco"
 slot_loaded_hash: str | None = None
 
 
@@ -55,6 +59,40 @@ def read_batt_c() -> float:
             return float(f.read().strip()) / 10.0
     except Exception:
         return 0.0
+
+
+def read_soc_c() -> float:
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+            v = float(f.read().strip())
+            return v / 1000.0 if v > 200.0 else v
+    except Exception:
+        return 0.0
+
+
+def set_thermal_tier(target: str) -> None:
+    global thermal_tier
+    if thermal_tier == target:
+        return
+    profile = {"burst": "full", "cruise": "balanced", "guard": "eco", "eco": "eco"}.get(
+        target, "balanced"
+    )
+    bridge_cmd(f"PROFILE_SET {profile}")
+    thermal_tier = target
+
+
+def regulate_thermal(active: bool) -> None:
+    batt = read_batt_c()
+    soc = read_soc_c()
+    if not active:
+        set_thermal_tier("eco")
+        return
+    if batt >= MAX_BATT_TEMP_C or soc >= MAX_SOC_TEMP_C:
+        set_thermal_tier("guard")
+    elif batt < BURST_MAX_BATT_C and soc < BURST_MAX_SOC_C:
+        set_thermal_tier("burst")
+    else:
+        set_thermal_tier("cruise")
 
 
 def backend_healthy() -> bool:
@@ -220,8 +258,10 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "state": state,
+                    "thermal_tier": thermal_tier,
                     "mode": MODE,
                     "batt_c": read_batt_c(),
+                    "soc_c": read_soc_c(),
                     "slot_loaded_hash": slot_loaded_hash,
                 },
             )
@@ -262,6 +302,8 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             active_reqs += 1
             last_activity = time.monotonic()
+            regulate_thermal(True)
+        last_therm = time.monotonic()
         resp_status = 0
         try:
             conn = http.client.HTTPConnection("127.0.0.1", BACKEND_PORT, timeout=600)
@@ -288,8 +330,12 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self.wfile.write(chunk)
                 self.wfile.flush()
+                now = time.monotonic()
                 with lock:
-                    last_activity = time.monotonic()
+                    last_activity = now
+                    if now - last_therm >= 1.0:
+                        regulate_thermal(True)
+                        last_therm = now
             if is_chunked:
                 self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()
@@ -303,6 +349,8 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 active_reqs = max(0, active_reqs - 1)
                 last_activity = time.monotonic()
+                if active_reqs == 0:
+                    regulate_thermal(False)
         if prefix_hash and resp_status == 200:
             maybe_save_prefix(prefix_hash)
 
