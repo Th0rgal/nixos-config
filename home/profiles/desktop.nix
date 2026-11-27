@@ -118,9 +118,10 @@ in
       ps.enumitem
       ps.cm-super
     ]))
-    # PDF viewer, as in Omarchy's own defaults (its window rules already float it).
+    # PDF, image, and video viewers matching Omarchy's defaults.
     pkgs.evince
     pkgs.imv
+    pkgs.mpv
   ];
 
   programs.omarchnix = {
@@ -144,14 +145,7 @@ in
         "claude"
         "codex"
       ];
-      orbSync = {
-        enable = true;
-        orbOnly = true;
-        minimalHud = true;
-        launchInOrb = false;
-        manageAccountsInPanel = false;
-        pollInterval = "5m";
-      };
+      orbSync.enable = false;
     };
 
     theme = {
@@ -165,7 +159,21 @@ in
       };
     };
 
-    shell.elsewhenCities = user.elsewhenCities;
+    sharing.barSection = "tray";
+
+    shell = {
+      inherit (user) elsewhenCities;
+      disabledPlugins = [ "omarchy.agents" ];
+      purgedPluginIds = [ "omarchy.agents" ];
+      trayWidgetIds = [
+        "omarchy.monitor"
+        "omarchy.bluetooth"
+      ];
+      hiddenTrayIds = [
+        "Antigravity_status_icon_1"
+        "TelegramDesktop"
+      ];
+    };
 
     macos = {
       enable = lib.mkDefault true;
@@ -238,7 +246,35 @@ in
       "image/tiff-fx"
       "image/webp"
       "image/x-farbfeld"
-    ] (_: [ "imv.desktop" ]);
+    ] (_: [ "imv.desktop" ])
+    // lib.genAttrs [
+      "video/3gpp"
+      "video/3gpp2"
+      "video/avi"
+      "video/mp2t"
+      "video/mp4"
+      "video/mpeg"
+      "video/ogg"
+      "video/quicktime"
+      "video/webm"
+      "video/x-flv"
+      "video/x-m4v"
+      "video/x-matroska"
+      "video/x-ms-wmv"
+      "video/x-msvideo"
+      "audio/aac"
+      "audio/flac"
+      "audio/m4a"
+      "audio/mp4"
+      "audio/mpeg"
+      "audio/ogg"
+      "audio/opus"
+      "audio/wav"
+      "audio/webm"
+      "audio/x-m4a"
+      "audio/x-matroska"
+      "audio/x-wav"
+    ] (_: [ "mpv.desktop" ]);
   };
 
   # Present Vesktop as "Discord" with the official Discord icon in Spotlight & Dock,
