@@ -66,6 +66,7 @@ put_file() { # key path
 
 put_file nix_builder_spark_key /root/.ssh/nix-builder-spark
 put_file nix_signing_key /etc/nix/signing-key.sec
+put_file oura_auth_key "/home/$owner/.config/oura/key.hex"
 if has restic_password; then
   echo "kept    restic_password"
 else

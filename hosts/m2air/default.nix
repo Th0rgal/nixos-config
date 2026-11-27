@@ -2,6 +2,7 @@
 # Shared workstation apps, policies, keyring, IME, remote builder, and backups live in
 # `hosts/common/workstation.nix`; this file holds only Apple Silicon / laptop specifics.
 {
+  config,
   lib,
   pkgs,
   inventory,
@@ -81,7 +82,13 @@ in
   };
 
   home-manager.users.${user.username} = {
-    programs.omarchnix.sharing.kdeconnect.androidMirroring.enable = false;
+    programs.omarchnix = {
+      sharing.kdeconnect.androidMirroring.enable = false;
+      oura = {
+        enable = true;
+        keyFile = config.thomas.secrets.path "oura_auth_key" "/home/${user.username}/.config/oura/key.hex";
+      };
+    };
   };
 
   # YubiKey PIV SSH agent for the Paloma fleet admin key (`thomas-yubikey-admin`).

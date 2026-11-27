@@ -78,6 +78,12 @@ in
               mode = "0400";
             };
           })
+          (lib.mkIf (has "oura_auth_key") {
+            oura_auth_key = {
+              owner = user.username;
+              mode = "0400";
+            };
+          })
         ];
       };
     })
