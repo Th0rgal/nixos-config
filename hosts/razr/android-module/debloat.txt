@@ -1,0 +1,49 @@
+# Safe, 100% reversible Motorola Razr 60 Ultra debloat list.
+# Every package here is disabled via `pm disable-user --user 0 <pkg>` (re-enable anytime with `pm enable <pkg>`).
+# Never touches: GMS, Play Store, Wallet, TEESim, Camera, Smart Connect, CliSettings, Launcher3 (Quickstep).
+
+# US Carrier bloat (unused in EU/Lisbon)
+com.att.personalcloud
+com.aura.oobe.motorola
+com.dti.motorola
+com.motorola.att.phone.extensions
+com.motorola.att.sim.extensions
+com.motorola.attvowifi
+com.motorola.omadm.att
+com.motorola.omadm.vzw
+com.motorola.tmo.settingsext
+com.motorola.tmo.setupext
+com.motorola.vzw.pco.extensions.pcoreceiver
+com.motorola.sprint.setupext
+com.motorola.spectrum.setup.extensions
+
+# Motorola telemetry, demo, ad/app preloader & unused bloat
+com.motorola.demo
+com.motorola.bug2go
+com.motorola.brapps
+com.motorola.appforecast
+com.motorola.play
+com.motorola.playautoinstallext
+com.motorola.bach.modemstats
+com.motorola.lifetimedata
+com.motorola.motocare
+com.motorola.motomigrate
+com.motorola.genie
+com.motorola.help
+com.motorola.help.extlog
+com.motorola.gamemode
+com.motorola.gamehub
+com.motorola.retrorazr
+com.motorola.dimo
+com.motorola.journal
+com.motorola.createwithai
+com.motorola.magicwords
+com.motorola.spaces
+
+# Heavy prebuilt animated live wallpapers (replaced by static Omarchnix Dark/Light portraits)
+com.motorola.livewallpaper3.prebuilt.blue_ryhme_cli
+com.motorola.livewallpaper3.prebuilt.curious_jellyfish
+com.motorola.livewallpaper3.prebuilt.delightful_pufferfish
+com.motorola.livewallpaper3.prebuilt.drifting_turtle
+com.motorola.livewallpaper3.prebuilt.green_light_cli
+com.motorola.livewallpaper3.prebuilt.pure_blush_cli

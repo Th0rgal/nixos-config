@@ -126,12 +126,38 @@
         ''
       );
 
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          omarchnixPkgs = import nixpkgs {
+            inherit system;
+            overlays = [ omarchnix.overlays.default ];
+          };
+          razrAndroidModule = import ./hosts/razr/android-module {
+            inherit pkgs;
+            inherit (omarchnixPkgs) michelangelus-font;
+          };
+        in
+        {
+          razr-android-module = razrAndroidModule.package;
+        }
+      );
+
       # Report-only linters (`statix` anti-patterns, `deadnix` unused bindings):
       # `nix run .#lint`. Neither rewrites files; `nix fmt` stays the only formatter.
       apps = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          omarchnixPkgs = import nixpkgs {
+            inherit system;
+            overlays = [ omarchnix.overlays.default ];
+          };
+          razrAndroidModule = import ./hosts/razr/android-module {
+            inherit pkgs;
+            inherit (omarchnixPkgs) michelangelus-font;
+          };
           lint = pkgs.writeShellApplication {
             name = "nix-lint";
             runtimeInputs = [
@@ -151,6 +177,11 @@
             type = "app";
             program = "${lint}/bin/nix-lint";
             meta.description = "Run statix and deadnix over the flake (report-only)";
+          };
+          razr-deploy-android-module = {
+            type = "app";
+            program = "${razrAndroidModule.deploy}/bin/razr-deploy-android-module";
+            meta.description = "Deploy the Nix-built Magisk/KernelSU module (Omarchnix fonts & tweaks) to a connected Razr over ADB";
           };
         }
       );

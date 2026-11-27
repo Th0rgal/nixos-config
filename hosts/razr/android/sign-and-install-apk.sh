@@ -29,5 +29,5 @@ nix shell nixpkgs#apksigner --command apksigner sign \
     "$APK_IN"
 
 nix shell nixpkgs#apksigner --command apksigner verify --print-certs "$APK_OUT" | head -n 5
-adb install -r "$APK_OUT"
+adb install -r --no-incremental "$APK_OUT"
 echo "In-place update complete (no uninstall, cover-screen & Magisk UID preserved)."

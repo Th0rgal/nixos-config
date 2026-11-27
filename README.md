@@ -1,6 +1,6 @@
 # `Th0rgal/nixos-config`
 
-Personal NixOS & Home Manager configurations for Thomas's MacBook Air M2 (`m2air`, `m2air-aurora`, `m2air-stock`) and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
+Personal NixOS & Home Manager configurations for Thomas's MacBook Air M2 (`m2air`, `m2air-aurora`, `m2air-stock`), Motorola Razr 60 Ultra (`razr`, running SideSystem NixOS alongside Android 15), and turnkey desktop VMs (`vm`, `vm-x86_64`), built on top of [`Th0rgal/omarchnix`](https://github.com/Th0rgal/omarchnix) and [`Th0rgal/wallpapers`](https://github.com/Th0rgal/wallpapers).
 
 ## Architecture
 
@@ -14,6 +14,7 @@ Personal NixOS & Home Manager configurations for Thomas's MacBook Air M2 (`m2air
 
 - **`m2air`** (and alias **`m2air-aurora`**): MacBook Air M2 daily driver (`aarch64-linux`, Asahi Linux + removable ARM64 UEFI GRUB on `UUID=C650-1003` + LUKS2 `cryptroot` `UUID=aa0403dd-9917-49e1-85b1-46b21b39f2d9`), with `aurora-silicon/nixos-aurora` Secure Enclave, Touch ID (`fprintd`), FIDO2 (`aurora-fido`), and Orb Touch ID signer enabled.
 - **`m2air-stock`**: Fallback MacBook Air M2 target using stock `nixos-apple-silicon` without Stage-2 Aurora SEP.
+- **`razr`**: Motorola Razr 60 Ultra (`aarch64-linux` SideSystem NixOS container sharing `hosts/common/workstation.nix` 1:1 with `m2air`), plus a Nix-built Android Magisk/KernelSU personalization module (`hosts/razr/android-module/`, adding Omarchnix fonts `IBM Plex Sans`, `Michelangelus`, and `Lilex` to Moto Personalize + declarative boot-time Android tweaks). Private root/Play Integrity/keybox files stay in the separate private `Th0rgal/razr60-ultra-pif` repo.
 - **`vm`** / **`vm-x86_64`**: Turnkey QEMU desktop virtual machines (`aarch64-linux` / `x86_64-linux`) running the exact same Omarchy + macOS-feel desktop, `starship-subtle` theme, and Space `1..8` wallpapers from `Th0rgal/wallpapers`.
 
 The DGX Spark runs Ubuntu and builds ARM packages remotely for the MacBook. Both VM targets use the shared desktop for screenshots. On an x86 Linux cloud worker with Nix and flakes enabled, build the QEMU launcher from the root of this checkout using the public CI inventory.
@@ -80,6 +81,10 @@ nixos-rebuild build-vm --flake ~/nixos-config#vm
 
 # Pull latest omarchnix or wallpapers upstream changes:
 cd ~/nixos-config && nix flake update omarchnix wallpapers
+
+# Build & deploy the Razr 60 Ultra Android personalization module (fonts + tweaks) over ADB:
+nix build .#razr-android-module
+nix run .#razr-deploy-android-module -- --reboot
 
 # Backups (docs/backup.md) and secrets bootstrap:
 backup status

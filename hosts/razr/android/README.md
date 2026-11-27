@@ -161,6 +161,57 @@ razr-gpu-mode toggle
 
 ---
 
+## Declarative Android Personalization (`../android-module/`)
+
+Public, Nix-built Android systemless customizations live in [`hosts/razr/android-module/`](../android-module/) so they stay in sync with your Omarchnix desktop flake (while private root / Play Integrity / keybox files remain in the separate private `Th0rgal/razr60-ultra-pif` repository).
+
+### Razr App & Repo Map
+
+| Project | Canonical Repository | Visibility | Role |
+| :--- | :--- | :--- | :--- |
+| **SideSystem** | [`Th0rgal/sidesystem`](https://github.com/Th0rgal/sidesystem) (`/home/thomas/work/sidesystem`) | Public | Reusable Android companion app (`android-app/`), C daemons, Hexagon SDK & NixOS+Hyprland container bridge. |
+| **Scribe** *(formerly Orb Voice)* | [`Th0rgal/scribe`](https://github.com/Th0rgal/scribe) (`/home/thomas/work/scribe`) | Public | Real-time voice transcription, live streaming translation & speaker diarization app (`android/`, `app/`, `spark-voice-service/`). |
+| **Orb Glass Launcher** *(Kvaesitso fork)* | `/home/thomas/work/kvaesitso` (`orb-glass` branch) | Public fork | Custom iOS + Orb Desktop frosted-glass fork of `MM2-0/Kvaesitso` (Obsidian/Alabaster `0.35`/`0.48` glass + hairline borders, frosted dock, Spotlight pill, **Orb Today** replacing Google News). |
+| **Razr NixOS & Personalization** | [`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config) (`hosts/razr/`) | Public | Personal `razr` NixOS host (`workstation.nix` 1:1 with `m2air`), Nix-built Magisk module (`android-module/`), and Android shell/scripts. |
+| **Razr Root & Play Integrity** | `Th0rgal/razr60-ultra-pif` (`/home/thomas/work/razr60-ultra-pif`) | Private | Hardware keyboxes, device serial (`ZY22MPNPWH`), pinned Zygisk/Shamiko/TEESimulator/PIF zips & `keybox-auto.sh`. |
+
+*(Note: `hosts/razr/sidesystem-app/` and `hosts/razr/orb-voice-app/` in `nixos-config` are earlier snapshots kept before SideSystem and Scribe moved to their dedicated repos above.)*
+
+### What `razr-android-module` Packages
+- **Omarchnix System Fonts (`Moto → Personalize → Fonts`):** Pulls `IBM Plex Sans`, `Michelangelus`, and `Lilex` straight from your Nix flake into `/system/product/fonts/`, appends them to Motorola's `/system/product/etc/fonts_customization.xml`, and compiles + signs native Android 15 RRO overlay APKs (`/system/product/overlay/Font*Overlay.apk`) using a pure-Python AXML/ARSC builder (`build-font-rro.py`) so it builds natively on both `aarch64-linux` and `x86_64-linux`.
+- **Hardware Keymap (`gpio-keys.kl`):** Remaps the left AI key (scancode `217`) from `ASSIST` to `F13` (superseding the standalone `/data/adb/modules/razr-ai-key` module).
+- **Declarative Boot Settings (`service.sh`):** Idempotently disables Android's phantom process killer (`max_phantom_processes=2147483647`) and sets `0.5x` system animation scales on every boot.
+
+### Build & Deploy Over ADB
+```bash
+cd /home/thomas/work/nixos/nixos-config
+
+# Build the Magisk/KernelSU module tree + flashable zip (result/razr-omarchnix-mod.zip):
+nix build .#razr-android-module
+
+# Push directly to /data/adb/modules/razr-omarchnix over ADB and reboot to activate:
+nix run .#razr-deploy-android-module -- --reboot
+```
+
+After reboot, open **Moto → Personalize → Fonts** (or verify via `adb shell "su -c 'cmd overlay list | grep -iE \"IBMPlexSans|Michelangelus|Lilex\"'"`) to select **IBM Plex Sans**, **Michelangelus**, or **Lilex** across both the inner display and cover screen.
+
+---
+
+## Omarchdroid Shell (`../omarchdroid-shell/`)
+
+Lightweight, zero-AccessibilityService Kotlin/Compose companion app (`com.th0rgal.omarchdroid`) implementing Thomas's Obsidian/Alabaster `ui-style` directly on Android 15:
+- **Camera-Hugging Dynamic Island (`IslandOverlayService` + `IslandNotificationListener`):** Uses `NotificationListenerService` + `MediaSessionManager` + `TYPE_APPLICATION_OVERLAY` (no AccessibilityService overhead). Wraps the inner punch-hole camera in a `#000000` hairline pill that surfaces live **Scribe** recording status, **SideSystem** container status, media controls, and recent notifications.
+- **Cover-Screen "Starship Subtle" Panel (`MainActivity`, `moto_cli_fullscreen_mode=true`):** Full-bleed back-screen panel with an editorial **Michelangelus** clock, **IBM Plex Sans** date, **Lilex** tabular battery chip, and a bottom-left floating pill dock respecting the twin-camera cutout (`220dp × 155dp`).
+- **Inner-Screen Control Center:** One-tap Dynamic Island toggle, permission status chips, and quick launchers for **Scribe**, **SideSystem**, **Kvaesitso** (FOSS Spotlight-style inner `HOME` launcher), and **Moto Personalize → Fonts**.
+
+```bash
+cd /home/thomas/work/nixos/nixos-config/hosts/razr/omarchdroid-shell
+nix shell nixpkgs#gradle nixpkgs#jdk17_headless --command gradle assembleDebug --no-daemon
+../android/sign-and-install-apk.sh app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
 ## Troubleshooting
 
 - **Black screen or Vulkan crash on Adreno:** Switch to software mode (`razr-gpu-mode sw`) and restart `./razr-desktop.sh`. Verify `/dev/kgsl-3d0` is visible inside the container and user `thomas` has read/write access (e.g., `video` / `render` / `droidspaces-gpu` group).
