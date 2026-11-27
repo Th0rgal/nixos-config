@@ -1870,6 +1870,98 @@ private fun TelemetryGraphCard(
                 }
             }
 
+            if (status.bonsaiRunning) {
+                Spacer(modifier = Modifier.height(if (compact) 6.dp else 8.dp))
+                HorizontalDivider(thickness = 1.dp, color = OrbBorder)
+                Spacer(modifier = Modifier.height(if (compact) 6.dp else 8.dp))
+                val isDecoding = status.bonsaiPhase == "decoding"
+                val isPrefill = status.bonsaiPhase == "prefill"
+                val tierUpper = status.bonsaiThermalTier.uppercase(Locale.US)
+                val tierColor = when (status.bonsaiThermalTier.lowercase(Locale.US)) {
+                    "burst" -> OrbGreen
+                    "cruise" -> OrbAmber
+                    "guard" -> OrbRed
+                    else -> OrbFgMuted
+                }
+                val rateText = when {
+                    isDecoding && status.bonsaiTokS > 0.05f ->
+                        String.format(Locale.US, "%.1f tok/s", status.bonsaiTokS)
+                    isPrefill -> "PREFILL"
+                    status.bonsaiLastTokS > 0.05f ->
+                        String.format(Locale.US, "%.1f tok/s · IDLE", status.bonsaiLastTokS)
+                    else -> "IDLE"
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isDecoding || isPrefill) OrbGreen else OrbFgSubtle)
+                        )
+                        Text(
+                            text = "NPU",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = if (compact) 10.sp else 11.sp,
+                                letterSpacing = 0.6.sp
+                            ),
+                            color = OrbFgMuted
+                        )
+                        Text(
+                            text = status.bonsaiBackend,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = if (compact) 10.sp else 11.sp
+                            ),
+                            color = OrbFgStrong
+                        )
+                        Text(
+                            text = tierUpper,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = if (compact) 9.sp else 10.sp,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = tierColor
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = rateText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = if (compact) 11.sp else 12.sp,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = if (isDecoding) OrbGreen else if (isPrefill) OrbAmber else OrbFgStrong
+                        )
+                        if (status.battTempC > 0) {
+                            Text(
+                                text = "${status.battTempC}°C",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = if (compact) 10.sp else 11.sp,
+                                    fontFeatureSettings = "tnum"
+                                ),
+                                color = OrbFgMuted
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(if (compact) 6.dp else 10.dp))
 
             val chartBorder = OrbBorder

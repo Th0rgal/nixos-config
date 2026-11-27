@@ -133,6 +133,13 @@ data class SideSystemStatus(
     val battTempC: Int = 0,
     val powerMw: Int = 0,
     val npuReady: Boolean = false,
+    val bonsaiRunning: Boolean = false,
+    val bonsaiPhase: String = "idle",
+    val bonsaiBackend: String = "npu-v8",
+    val bonsaiThermalTier: String = "eco",
+    val bonsaiTokS: Float = 0f,
+    val bonsaiLastTokS: Float = 0f,
+    val bonsaiTokens: Int = 0,
     val lidClosed: Boolean = false,
     val chargeCap: ChargeCap = ChargeCap.OFF,
     val sunshineEnabled: Boolean = true,
@@ -392,7 +399,7 @@ object SideSystemCtl {
             val sshPort = obj.optInt("ssh_port", 2222).let { if (it > 0) it else 2222 }
             val vncPort = obj.optInt("vnc_port", 5900).let { if (it > 0) it else 5900 }
 
-            SideSystemStatus(
+            val parsed = SideSystemStatus(
                 containerRunning = containerRunning,
                 desktopRunning = desktopRunning,
                 systemdState = systemdState,
@@ -424,12 +431,44 @@ object SideSystemCtl {
                 lastError = null,
                 rootAvailable = true
             )
+            enrichWithBonsaiHealth(parsed)
         } catch (e: Exception) {
             SideSystemStatus(
                 networkType = fallbackNet,
                 ipAddress = fallbackIp,
                 lastError = "Invalid status JSON: ${e.message}"
             )
+        }
+    }
+
+    private fun enrichWithBonsaiHealth(base: SideSystemStatus): SideSystemStatus {
+        return try {
+            val conn = java.net.URL("http://127.0.0.1:8090/health").openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 350
+            conn.readTimeout = 350
+            conn.requestMethod = "GET"
+            if (conn.responseCode != 200) {
+                conn.disconnect()
+                return base
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            val j = JSONObject(body)
+            val battC = j.optDouble("batt_c", 0.0).toInt()
+            val socC = j.optDouble("soc_c", 0.0).toInt()
+            base.copy(
+                bonsaiRunning = true,
+                bonsaiPhase = j.optString("phase", j.optString("state", "idle")),
+                bonsaiBackend = j.optString("backend", "npu-v8"),
+                bonsaiThermalTier = j.optString("thermal_tier", "eco"),
+                bonsaiTokS = j.optDouble("tok_s", 0.0).toFloat(),
+                bonsaiLastTokS = j.optDouble("last_tok_s", 0.0).toFloat(),
+                bonsaiTokens = j.optInt("tokens_generated", 0),
+                battTempC = if (battC > 0) battC else base.battTempC,
+                socTempC = if (socC > 0) socC else base.socTempC
+            )
+        } catch (_: Exception) {
+            base
         }
     }
 

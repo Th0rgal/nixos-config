@@ -33,8 +33,13 @@ slot_lock = threading.Lock()
 last_activity = time.monotonic()
 active_reqs = 0
 state = "idle"
+phase = "idle"
 thermal_tier = "eco"
 slot_loaded_hash: str | None = None
+live_tok_s: float = 0.0
+last_tok_s: float = 0.0
+tokens_generated: int = 0
+BACKEND_VERSION = os.environ.get("BONSAI_BACKEND_VERSION", "npu-v8")
 
 
 def log(msg: str) -> None:
@@ -251,17 +256,22 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _proxy(self, method: str):
-        global active_reqs, last_activity
+        global active_reqs, last_activity, phase, live_tok_s, last_tok_s, tokens_generated
         if self.path == "/health":
             self._send_json(
                 200,
                 {
                     "status": "ok",
                     "state": state,
+                    "phase": phase,
+                    "backend": BACKEND_VERSION,
                     "thermal_tier": thermal_tier,
                     "mode": MODE,
                     "batt_c": read_batt_c(),
                     "soc_c": read_soc_c(),
+                    "tok_s": round(live_tok_s, 2),
+                    "last_tok_s": round(last_tok_s, 2),
+                    "tokens_generated": tokens_generated,
                     "slot_loaded_hash": slot_loaded_hash,
                 },
             )
@@ -302,8 +312,13 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             active_reqs += 1
             last_activity = time.monotonic()
+            phase = "prefill"
+            live_tok_s = 0.0
+            tokens_generated = 0
             regulate_thermal(True)
         last_therm = time.monotonic()
+        first_tok_t = 0.0
+        tok_count = 0
         resp_status = 0
         try:
             conn = http.client.HTTPConnection("127.0.0.1", BACKEND_PORT, timeout=600)
@@ -331,6 +346,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                 self.wfile.flush()
                 now = time.monotonic()
+                n_sse = chunk.count(b"data: {")
+                if n_sse > 0:
+                    if first_tok_t == 0.0:
+                        first_tok_t = now
+                    tok_count += n_sse
+                    elapsed = max(now - first_tok_t, 0.05)
+                    with lock:
+                        phase = "decoding"
+                        tokens_generated = tok_count
+                        live_tok_s = tok_count / elapsed
+                        last_tok_s = live_tok_s
                 with lock:
                     last_activity = now
                     if now - last_therm >= 1.0:
@@ -350,6 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                 active_reqs = max(0, active_reqs - 1)
                 last_activity = time.monotonic()
                 if active_reqs == 0:
+                    phase = "idle"
+                    live_tok_s = 0.0
                     regulate_thermal(False)
         if prefix_hash and resp_status == 200:
             maybe_save_prefix(prefix_hash)
