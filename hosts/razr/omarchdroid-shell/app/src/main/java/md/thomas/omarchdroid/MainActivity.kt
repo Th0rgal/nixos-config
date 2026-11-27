@@ -1,4 +1,4 @@
-package com.th0rgal.omarchdroid
+package md.thomas.omarchdroid
 
 import android.content.Context
 import android.content.Intent

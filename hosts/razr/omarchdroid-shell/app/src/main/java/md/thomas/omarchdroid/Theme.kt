@@ -1,4 +1,4 @@
-package com.th0rgal.omarchdroid
+package md.thomas.omarchdroid
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable

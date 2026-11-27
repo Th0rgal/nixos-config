@@ -1,4 +1,4 @@
-package com.th0rgal.sidesystem
+package md.thomas.sidesystem
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

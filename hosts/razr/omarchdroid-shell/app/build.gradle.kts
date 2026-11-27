@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.th0rgal.omarchdroid"
+    namespace = "md.thomas.omarchdroid"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.th0rgal.omarchdroid"
+        applicationId = "md.thomas.omarchdroid"
         minSdk = 31
         targetSdk = 35
         versionCode = 1

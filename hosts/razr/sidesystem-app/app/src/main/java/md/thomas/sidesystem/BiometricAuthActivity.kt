@@ -1,4 +1,4 @@
-package com.th0rgal.sidesystem
+package md.thomas.sidesystem
 
 import android.app.Activity
 import android.hardware.biometrics.BiometricManager

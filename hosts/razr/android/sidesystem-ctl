@@ -1053,7 +1053,7 @@ while true; do
         : > "$BIO_REQ" 2>/dev/null || true
         bnonce="${bline%%|*}"
         breason="${bline#*|}"
-        [ -n "$bnonce" ] && /system/bin/am start --user 0 -n com.th0rgal.sidesystem/.BiometricAuthActivity \
+        [ -n "$bnonce" ] && /system/bin/am start --user 0 -n md.thomas.sidesystem/.BiometricAuthActivity \
             --es nonce "$bnonce" --es reason "${breason:-NixOS authentication}" >/dev/null 2>&1 || true
     fi
     if [ -s "$REQ" ]; then

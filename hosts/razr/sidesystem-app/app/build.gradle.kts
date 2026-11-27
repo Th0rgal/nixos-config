@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.th0rgal.sidesystem"
+    namespace = "md.thomas.sidesystem"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.th0rgal.sidesystem"
+        applicationId = "md.thomas.sidesystem"
         minSdk = 31
         targetSdk = 35
         versionCode = 1

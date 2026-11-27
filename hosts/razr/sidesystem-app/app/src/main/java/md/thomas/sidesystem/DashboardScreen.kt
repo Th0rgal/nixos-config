@@ -1,4 +1,4 @@
-package com.th0rgal.sidesystem
+package md.thomas.sidesystem
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn

@@ -92,7 +92,7 @@ let
       cmd overlay enable com.android.shell:monolith_statusbar_clean 2>/dev/null || true
 
       # Keep core personal apps exempt from Doze/App Standby throttling.
-      for pkg in de.mm20.launcher2.debug com.th0rgal.orbvoice com.th0rgal.sidesystem; do
+      for pkg in de.mm20.launcher2.debug com.th0rgal.orbvoice md.thomas.sidesystem; do
         dumpsys deviceidle whitelist "+$pkg" >/dev/null 2>&1 || true
       done
 

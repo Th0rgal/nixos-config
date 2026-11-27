@@ -199,7 +199,7 @@ After reboot, open **Moto → Personalize → Fonts** (or verify via `adb shell 
 
 ## Omarchdroid Shell (`../omarchdroid-shell/`)
 
-Lightweight, zero-AccessibilityService Kotlin/Compose companion app (`com.th0rgal.omarchdroid`) implementing Thomas's Obsidian/Alabaster `ui-style` directly on Android 15:
+Lightweight, zero-AccessibilityService Kotlin/Compose companion app (`md.thomas.omarchdroid`) implementing Thomas's Obsidian/Alabaster `ui-style` directly on Android 15:
 - **Camera-Hugging Dynamic Island (`IslandOverlayService` + `IslandNotificationListener`):** Uses `NotificationListenerService` + `MediaSessionManager` + `TYPE_APPLICATION_OVERLAY` (no AccessibilityService overhead). Wraps the inner punch-hole camera in a `#000000` hairline pill that surfaces live **Scribe** recording status, **SideSystem** container status, media controls, and recent notifications.
 - **Cover-Screen "Starship Subtle" Panel (`MainActivity`, `moto_cli_fullscreen_mode=true`):** Full-bleed back-screen panel with an editorial **Michelangelus** clock, **IBM Plex Sans** date, **Lilex** tabular battery chip, and a bottom-left floating pill dock respecting the twin-camera cutout (`220dp × 155dp`).
 - **Inner-Screen Control Center:** One-tap Dynamic Island toggle, permission status chips, and quick launchers for **Scribe**, **SideSystem**, **Kvaesitso** (FOSS Spotlight-style inner `HOME` launcher), and **Moto Personalize → Fonts**.

@@ -1,4 +1,4 @@
-package com.th0rgal.omarchdroid
+package md.thomas.omarchdroid
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -273,8 +273,8 @@ class IslandOverlayService : LifecycleService() {
     }
 
     companion object {
-        const val ACTION_STOP = "com.th0rgal.omarchdroid.STOP"
-        const val ACTION_SYNC_WALLPAPER = "com.th0rgal.omarchdroid.SYNC_WALLPAPER"
+        const val ACTION_STOP = "md.thomas.omarchdroid.STOP"
+        const val ACTION_SYNC_WALLPAPER = "md.thomas.omarchdroid.SYNC_WALLPAPER"
         private const val CHANNEL_ID = "omarchdroid_island"
         private const val NOTIF_ID = 4201
     }

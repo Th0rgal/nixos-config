@@ -1,4 +1,4 @@
-package com.th0rgal.sidesystem
+package md.thomas.sidesystem
 
 import android.graphics.Bitmap
 import java.io.BufferedInputStream

@@ -369,7 +369,7 @@ static void handle_client(int fd) {
 
         char *argv[] = {
             "/system/bin/am", "start", "--user", "0",
-            "-n", "com.th0rgal.sidesystem/.BiometricAuthActivity",
+            "-n", "md.thomas.sidesystem/.BiometricAuthActivity",
             "--es", "nonce", nonce,
             "--es", "reason", reason,
             NULL

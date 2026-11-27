@@ -1,4 +1,4 @@
-package com.th0rgal.omarchdroid
+package md.thomas.omarchdroid
 
 import android.app.Notification
 import android.content.ComponentName

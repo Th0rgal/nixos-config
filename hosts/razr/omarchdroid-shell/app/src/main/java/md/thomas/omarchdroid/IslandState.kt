@@ -1,4 +1,4 @@
-package com.th0rgal.omarchdroid
+package md.thomas.omarchdroid
 
 import android.app.PendingIntent
 import android.media.session.MediaController
@@ -38,7 +38,7 @@ data class IslandSnapshot(
 
 object IslandState {
     const val PKG_SCRIBE = "com.th0rgal.orbvoice"
-    const val PKG_SIDESYSTEM = "com.th0rgal.sidesystem"
+    const val PKG_SIDESYSTEM = "md.thomas.sidesystem"
     const val PKG_KVAESITSO = "de.mm20.launcher2.release"
 
     private val _snapshot = MutableStateFlow(IslandSnapshot())
