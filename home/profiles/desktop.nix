@@ -17,33 +17,23 @@ in
   imports = [
     ./core.nix
     ../modules/backup.nix
-    inputs.folio.homeManagerModules.default
+    inputs.scribe.homeManagerModules.default
   ];
 
-  programs.folio = {
+  programs.scribe = {
     enable = true;
     defaultNotesDir = user.hindsight.notesDir;
     hindsight = {
       apiUrl = user.hindsight.apiUrl;
-      defaultBank = user.hindsight.bank;
-    }
-    // lib.optionalAttrs (options.programs.folio.hindsight ? syncBank) {
-      syncBank = user.hindsight.syncBank;
+      bank = user.hindsight.bank;
+      notesFolder = user.hindsight.notesFolder;
     };
   };
 
-  home.activation.ensureFolioNotesDir = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+  home.activation.ensureScribeNotesDir = config.lib.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/Notes"
-    # Remove any stale local desktop override from manual dev builds that shadows
-    # the Nix-managed folio.desktop in Spotlight/XDG launchers.
-    if [ -L "$HOME/.local/share/folio-app" ] && [ ! -e "$HOME/.local/share/folio-app" ]; then
-      rm -f "$HOME/.local/share/folio-app"
-    fi
-    if [ -f "$HOME/.local/share/applications/folio.desktop" ] \
-      && ${pkgs.gnugrep}/bin/grep -q "$HOME/.local/share/folio-app" "$HOME/.local/share/applications/folio.desktop" \
-      && [ ! -x "$HOME/.local/share/folio-app/bin/folio" ]; then
-      rm -f "$HOME/.local/share/applications/folio.desktop"
-    fi
+    # Clean up legacy Folio symlinks/desktop entries if present.
+    rm -f "$HOME/.local/share/folio-app" "$HOME/.local/share/applications/folio.desktop"
   '';
 
   # Seed `~/Pictures/Wallpapers/*.webp` from `inputs.wallpapers` on fresh VMs/workstations,
@@ -189,11 +179,11 @@ in
   home.sessionVariables = {
     BROWSER = "helium";
     QT_QPA_PLATFORMTHEME = "xdgdesktopportal";
-    FOLIO_SYNC_BANK = lib.mkDefault user.hindsight.syncBank;
+    SCRIBE_HINDSIGHT_FOLDER = lib.mkDefault user.hindsight.notesFolder;
   };
 
   home.activation.personalGtkBookmarks =
-    config.lib.dag.entryAfter [ "omarchnixUserDirs" "ensureFolioNotesDir" ]
+    config.lib.dag.entryAfter [ "omarchnixUserDirs" "ensureScribeNotesDir" ]
       ''
         bookmarks_file="$HOME/.config/gtk-3.0/bookmarks"
         mkdir -p "$HOME/.config/gtk-3.0"
@@ -366,14 +356,14 @@ in
       }
       {
         _args = [
-          "FOLIO_DEFAULT_NOTES_DIR"
+          "SCRIBE_DEFAULT_NOTES_DIR"
           user.hindsight.notesDir
         ];
       }
       {
         _args = [
-          "FOLIO_SYNC_BANK"
-          user.hindsight.syncBank
+          "SCRIBE_HINDSIGHT_FOLDER"
+          user.hindsight.notesFolder
         ];
       }
       {

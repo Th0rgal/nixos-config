@@ -35,7 +35,7 @@
     home-manager.follows = "omarchnix/home-manager";
     sops-nix.follows = "omarchnix/sops-nix";
     orb.follows = "omarchnix/orb";
-    folio.follows = "omarchnix/folio";
+    scribe.follows = "omarchnix/scribe";
   };
 
   outputs =
