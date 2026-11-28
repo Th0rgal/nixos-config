@@ -150,6 +150,53 @@ def ensure_awake() -> tuple[bool, str]:
     return False, "Backend wake timeout"
 
 
+CORE_TOOLS = ("bash", "read", "write", "edit", "glob", "grep", "ls", "list")
+COMPACT_SYSTEM_PROMPT = (
+    "You are OpenCode running locally on a Motorola Razr 60 Ultra "
+    "(Snapdragon 8 Elite SM8750, Hexagon V79 NPU) inside NixOS SideSystem. "
+    "Be concise and direct. Use tools when needed to inspect the system or files."
+)
+
+
+def compact_opencode_payload(body: bytes) -> bytes:
+    """Keep OpenCode requests well inside -c 8192 so GDN state never overflows."""
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return body
+    changed = False
+    msgs = payload.get("messages")
+    if isinstance(msgs, list):
+        sys_len = sum(
+            len(str(m.get("content", "")))
+            for m in msgs
+            if isinstance(m, dict) and m.get("role") in ("system", "developer")
+        )
+        if sys_len > 3000:
+            non_sys = [m for m in msgs if not (isinstance(m, dict) and m.get("role") in ("system", "developer"))]
+            payload["messages"] = [{"role": "system", "content": COMPACT_SYSTEM_PROMPT}] + non_sys
+            changed = True
+    tools = payload.get("tools")
+    if isinstance(tools, list) and len(tools) > 6:
+        kept = []
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            name = str((fn or {}).get("name", "")).lower()
+            if any(k == name or name.endswith("_" + k) for k in CORE_TOOLS):
+                t_copy = json.loads(json.dumps(t))
+                if isinstance(t_copy.get("function"), dict) and isinstance(t_copy["function"].get("description"), str):
+                    t_copy["function"]["description"] = t_copy["function"]["description"][:160]
+                kept.append(t_copy)
+        if kept:
+            payload["tools"] = kept
+            changed = True
+    if not changed:
+        return body
+    new_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    log(f"compacted OpenCode payload: {len(body)} -> {len(new_body)} bytes")
+    return new_body
+
+
 def extract_prefix_hash(body: bytes) -> tuple[str | None, int]:
     """Compute a stable SHA-256 hash over the static system prompt + tools schema."""
     try:
@@ -305,6 +352,8 @@ class Handler(BaseHTTPRequestHandler):
 
         prefix_hash = None
         if method == "POST" and self.path.startswith("/v1/chat/completions") and body:
+            body = compact_opencode_payload(body)
+            hdrs["Content-Length"] = str(len(body))
             prefix_hash, _ = extract_prefix_hash(body)
             if prefix_hash:
                 maybe_restore_prefix(prefix_hash)
