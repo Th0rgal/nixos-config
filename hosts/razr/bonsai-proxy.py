@@ -150,9 +150,9 @@ def ensure_awake() -> tuple[bool, str]:
     return False, "Backend wake timeout"
 
 
-CORE_TOOLS = ("bash", "read", "write", "edit", "glob", "grep", "ls", "list")
+CORE_TOOLS = ("bash", "read", "write", "edit", "glob", "grep", "find", "ls", "list")
 COMPACT_SYSTEM_PROMPT = (
-    "You are OpenCode running locally on a Motorola Razr 60 Ultra "
+    "You are a local coding agent running on a Motorola Razr 60 Ultra "
     "(Snapdragon 8 Elite SM8750, Hexagon V79 NPU) inside NixOS SideSystem. "
     "Be concise and direct. Use tools when needed to inspect the system or files."
 )

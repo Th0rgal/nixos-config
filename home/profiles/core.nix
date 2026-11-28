@@ -14,6 +14,7 @@ in
     ../modules/ssh-config.nix
     ../modules/agent-shims.nix
     ../modules/opencode.nix
+    ../modules/pi.nix
     ../modules/agent-identity.nix
     inputs.nix-index-database.homeModules.nix-index
   ];
