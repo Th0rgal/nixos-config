@@ -317,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
             tokens_generated = 0
             regulate_thermal(True)
         last_therm = time.monotonic()
-        first_tok_t = 0.0
+        tok_times: list[float] = []
         tok_count = 0
         resp_status = 0
         try:
@@ -327,17 +327,21 @@ class Handler(BaseHTTPRequestHandler):
             resp_status = resp.status
             self.send_response(resp.status)
             is_chunked = False
+            is_sse = False
             for k, v in resp.getheaders():
                 kl = k.lower()
                 if kl in ("connection", "keep-alive"):
                     continue
                 if kl == "transfer-encoding" and "chunked" in v.lower():
                     is_chunked = True
+                if kl == "content-type" and "text/event-stream" in v.lower():
+                    is_sse = True
                 self.send_header(k, v)
+            self.send_header("X-Accel-Buffering", "no")
             self.send_header("Connection", "close")
             self.end_headers()
             while True:
-                chunk = resp.read(4096)
+                chunk = resp.readline() if is_sse else resp.read(4096)
                 if not chunk:
                     break
                 if is_chunked:
@@ -348,15 +352,20 @@ class Handler(BaseHTTPRequestHandler):
                 now = time.monotonic()
                 n_sse = chunk.count(b"data: {")
                 if n_sse > 0:
-                    if first_tok_t == 0.0:
-                        first_tok_t = now
+                    for _ in range(n_sse):
+                        tok_times.append(now)
                     tok_count += n_sse
-                    elapsed = max(now - first_tok_t, 0.05)
+                    # Rolling 2.5s window (min 0.5s span to avoid burst spikes)
+                    cutoff = now - 2.5
+                    while tok_times and tok_times[0] < cutoff:
+                        tok_times.pop(0)
+                    span = max(now - tok_times[0], 0.5) if len(tok_times) > 1 else 0.5
+                    rate = len(tok_times) / span
                     with lock:
                         phase = "decoding"
                         tokens_generated = tok_count
-                        live_tok_s = tok_count / elapsed
-                        last_tok_s = live_tok_s
+                        live_tok_s = rate
+                        last_tok_s = rate
                 with lock:
                     last_activity = now
                     if now - last_therm >= 1.0:
